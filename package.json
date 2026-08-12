@@ -1,0 +1,11 @@
+{
+  "name": "voxel-body-editor",
+  "version": "1.0.0",
+  "description": "Web-based level editor for Voxel Volley VoxelBody Unity assets",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node tests/run.mjs"
+  }
+}

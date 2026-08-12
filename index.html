@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxel Volley — Body Editor</title>
+<meta name="description" content="Design VoxelBody models cube-by-cube and export Unity .asset files for Voxel Volley levels.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧊</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+
+<header id="topbar">
+  <div id="brand">Voxel Volley <small>/ body editor</small></div>
+  <div class="field"><label for="fName">Asset</label><input type="text" id="fName" spellcheck="false"></div>
+  <div class="field"><label for="fDisplay">Display</label><input type="text" id="fDisplay" spellcheck="false"></div>
+  <div class="spacer"></div>
+  <div class="btns">
+    <button id="btnNew" title="Start a fresh empty model">New</button>
+    <button id="btnSample" title="Load the sample Bird asset">Sample</button>
+    <button id="btnImage" title="Generate a voxel body from a PNG image">PNG…</button>
+    <button id="btnImportVox" title="Import a MagicaVoxel .vox model">.vox…</button>
+    <button id="btnImportAsset" title="Import a VoxelBody .asset file">Import</button>
+    <button id="btnPaste" title="Paste .asset YAML text">Paste</button>
+    <button id="btnShot" title="Save a PNG screenshot of the 3D view">Shot</button>
+    <button id="btnCopy" title="Copy .asset YAML to clipboard">Copy YAML</button>
+    <button id="btnExport" class="primary" title="Save as Unity .asset file">Export .asset</button>
+    <button id="btnHelp" title="Keyboard shortcuts (?)">?</button>
+  </div>
+  <input type="file" id="fileAsset" accept="*/*" hidden>
+  <input type="file" id="fileImage" accept="image/*" hidden>
+  <input type="file" id="fileVox" accept=".vox" hidden>
+</header>
+
+<div id="main">
+  <!-- tool rail -->
+  <nav id="toolrail" aria-label="Tools">
+    <button class="toolbtn active" data-tool="build" title="Build (A) — click a face or the floor to add a cube; right-click removes">
+      <svg viewBox="0 0 24 24"><path d="M12 3l7 4v7l-7 4-7-4V7z"/><path d="M12 11l7-4M12 11L5 7M12 11v7"/></svg><span>BUILD</span></button>
+    <button class="toolbtn" data-tool="paint" title="Paint (B) — recolours cubes; right-click erases">
+      <svg viewBox="0 0 24 24"><path d="M15 4l5 5-9.5 9.5a2 2 0 0 1-1 .5l-4 .8.8-4a2 2 0 0 1 .5-1z"/></svg><span>PAINT</span></button>
+    <button class="toolbtn" data-tool="rect" title="Rectangle (R) — drag a filled rectangle in the layer editor">
+      <svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/></svg><span>RECT</span></button>
+    <button class="toolbtn" data-tool="erase" title="Erase (E)">
+      <svg viewBox="0 0 24 24"><path d="M9 15l7-7 4 4-7 7H9l-3-3 3-3z"/><path d="M4 20h16"/></svg><span>ERASE</span></button>
+    <button class="toolbtn" data-tool="fill" title="Fill (G) — flood fill; connected region in 3D, area in the layer editor">
+      <svg viewBox="0 0 24 24"><path d="M12 3v4M6 10l6-6 7 7-7 7-7-7h11"/><path d="M19.5 15.5s1.5 2 1.5 3a1.5 1.5 0 0 1-3 0c0-1 1.5-3 1.5-3z"/></svg><span>FILL</span></button>
+    <button class="toolbtn" data-tool="pick" title="Pick colour (I)">
+      <svg viewBox="0 0 24 24"><path d="M14 6l4 4-8.5 8.5H7a1 1 0 0 1-1-1v-2.5z"/><path d="M13 7l2-2a2.1 2.1 0 0 1 3 0l1 1a2.1 2.1 0 0 1 0 3l-2 2"/></svg><span>PICK</span></button>
+    <button class="toolbtn" data-tool="unit" title="Unit (U) — toggle a unit on a cube">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/></svg><span>UNIT</span></button>
+    <div id="kindWrap"><input type="number" id="unitKind" value="1" min="1" max="99" title="Unit kind value"><span class="railhead">kind</span></div>
+
+    <div class="railhead">Colours</div>
+    <div id="palette"></div>
+
+    <div class="railhead">Mirror</div>
+    <button class="minibtn tgl" id="chkSymX" title="Mirror edits left–right (X)">sym X</button>
+    <button class="minibtn tgl" id="chkSymZ" title="Mirror edits front–back (Z)">sym Z</button>
+
+    <div class="railhead">Model</div>
+    <button class="minibtn" data-flip="x" title="Flip left–right">flip X</button>
+    <button class="minibtn" data-flip="y" title="Flip top–bottom">flip Y</button>
+    <button class="minibtn" data-flip="z" title="Flip front–back">flip Z</button>
+    <button class="minibtn" id="btnRotateY" title="Rotate 90° around the vertical axis">rot 90</button>
+    <button class="minibtn" id="btnHollow" title="Remove fully-enclosed interior voxels">hollow</button>
+    <div class="railhead">Shift</div>
+    <div class="shiftgrid">
+      <button class="minibtn" data-shift="x,-1" title="Shift −X">x−</button>
+      <button class="minibtn" data-shift="x,1" title="Shift +X">x+</button>
+      <button class="minibtn" data-shift="y,-1" title="Shift up">y+</button>
+      <button class="minibtn" data-shift="y,1" title="Shift down">y−</button>
+      <button class="minibtn" data-shift="z,-1" title="Shift −Z">z−</button>
+      <button class="minibtn" data-shift="z,1" title="Shift +Z">z+</button>
+    </div>
+    <div class="railhead">Edit</div>
+    <button class="minibtn" id="btnUndo" title="Undo (Ctrl+Z)">undo</button>
+    <button class="minibtn" id="btnRedo" title="Redo (Ctrl+Y)">redo</button>
+    <button class="minibtn danger" id="btnClear" title="Clear all voxels">clear</button>
+  </nav>
+
+  <!-- workspace -->
+  <div id="workspace">
+    <section class="pane" aria-label="Layer editor">
+      <div class="panehead">
+        Layer editor · top view, bottom → up
+        <label class="chk"><input type="checkbox" id="chkOnion" checked> onion</label>
+        <label class="chk"><input type="checkbox" id="chkCoords"> coords</label>
+      </div>
+      <div class="panebody" id="slicePane"><canvas id="sliceCanvas"></canvas></div>
+      <div id="sliceFoot">
+        <span id="sliceLbl">y 00/13</span>
+        <input type="range" id="sliceRange" min="0" max="13" value="7" aria-label="Height layer (0 = bottom)">
+        <div id="occ" title="Voxels per layer — click to jump"></div>
+      </div>
+    </section>
+    <section class="pane" aria-label="3D editor">
+      <div class="panehead">
+        3D editor
+        <label class="chk"><input type="checkbox" id="chkHiLayer"> highlight layer</label>
+        <label class="chk"><input type="checkbox" id="chkSpin"> spin</label>
+        <button class="minibtn" id="btnResetView" title="Reset camera (double-click also works)">reset view</button>
+      </div>
+      <div class="panebody" id="viewPane">
+        <span id="voxCount"></span>
+        <span id="viewHint">click face/floor: place cube · right-click: remove · drag: orbit · wheel: zoom</span>
+      </div>
+    </section>
+  </div>
+
+  <!-- inspector -->
+  <aside id="inspector">
+    <div id="tabs">
+      <button class="active" data-tab="model">Model</button>
+      <button data-tab="rules">Rules</button>
+      <button data-tab="crates">Crates</button>
+      <button data-tab="stats">Stats</button>
+      <button data-tab="library">Library</button>
+    </div>
+
+    <div class="tabpane active" id="tab-model">
+      <div class="sechead">Grid</div>
+      <div class="frow"><label for="fSize">Size (cube)</label>
+        <span><input type="number" id="fSize" min="4" max="40"> <button id="btnResize">Apply</button></span></div>
+      <div class="frow"><label for="fDepth">Depth (voxelizer)</label><input type="number" id="fDepth" min="1" max="40"></div>
+      <div class="sechead">Voxelizer params (stored on asset)</div>
+      <div class="frow"><label for="fSmooth">Smoothness</label><input type="number" id="fSmooth" min="0" max="100"></div>
+      <div class="frow"><label for="fAlpha">Alpha threshold</label><input type="number" id="fAlpha" min="0" max="1" step="0.001"></div>
+      <div class="frow"><label for="fGrey">Grey → wildcard</label><input type="checkbox" id="fGrey"></div>
+      <div class="sechead">Gameplay</div>
+      <div class="frow"><label for="fShell">Wrap in shell</label><input type="checkbox" id="fShell"></div>
+      <div class="frow"><label for="fMisplay">Misplay tolerance</label><input type="number" id="fMisplay" min="0"></div>
+      <div class="sechead">Display palette (this browser only)</div>
+      <div id="palEdit" class="palEdit"></div>
+      <div class="frow"><span class="note" style="margin:0">Exports store colour indices, never hex — match these to the game's real colours.</span>
+        <button id="palReset">Reset</button></div>
+      <div class="sechead">Unity wiring</div>
+      <div class="frow"><label for="fGuid">Script GUID</label><input type="text" id="fGuid" spellcheck="false" title="GUID of VoxelBody.cs from your project's .meta file"></div>
+      <p class="note">The script GUID ties the asset to <b>VoxelVolley.VoxelBody</b> in Unity. Pre-filled from your existing assets — leave it unless the .meta GUID changes. Source image references are preserved on import and exported as-is.</p>
+    </div>
+
+    <div class="tabpane" id="tab-rules">
+      <div class="sechead">Layer rules <button id="addLayerRule">+ rule</button></div>
+      <p class="note" style="margin:0 0 8px">Layer 0 = outer surface (onion-peel order). Used by the PNG generator and stored on the asset.</p>
+      <table class="rules" id="layerRulesTbl"></table>
+      <div class="sechead">Unit rules <button id="addUnitRule">+ rule</button></div>
+      <table class="rules" id="unitRulesTbl"></table>
+      <p class="note">Unit rules describe intent (count per layer). Painted units in the grid are what actually exports — Stats flags mismatches.</p>
+    </div>
+
+    <div class="tabpane" id="tab-crates">
+      <div class="frow"><label for="fCustomGrid">Custom crate grid</label><input type="checkbox" id="fCustomGrid"></div>
+      <div class="frow"><label for="fCrateRows">Crate rows</label><input type="number" id="fCrateRows" min="1"></div>
+      <div class="sechead">Crate cells <span><button id="autoCrates" title="Generate cells from voxel colour counts">auto-fill</button> <button id="addCrate">+ cell</button></span></div>
+      <div class="crateGrid" id="crateCells"></div>
+      <div class="sechead">Refills <button id="addRefill">+ refill</button></div>
+      <div class="crateGrid" id="crateRefills"></div>
+      <p class="note">Colour −1 = any/random. Flags come from the game code (sample uses 1 for cells, 8 for refills).</p>
+    </div>
+
+    <div class="tabpane" id="tab-stats">
+      <div class="sechead">Ammo balance</div>
+      <table class="statTbl" id="statsTbl"></table>
+      <p class="note" id="statsNote"></p>
+      <div class="sechead">Validation</div>
+      <ul id="validList" class="valid"></ul>
+    </div>
+
+    <div class="tabpane" id="tab-library">
+      <div class="sechead">This browser <button id="libSave" title="Save the current model to this browser's library">save current</button></div>
+      <div id="libList" class="libList"></div>
+      <div class="sechead">Team levels (from the repo) <button id="btnRefreshTeam" title="Re-fetch levels/index.json">refresh</button></div>
+      <div id="teamList" class="libList"></div>
+      <p class="note">Team levels are .asset files committed to this repo and listed in <b>levels/index.json</b> — everyone who opens this page sees them. Your browser library is private to this machine; use Export/Import or team levels to share.</p>
+    </div>
+  </aside>
+</div>
+
+<!-- paste modal -->
+<div class="modal" id="pasteModal">
+  <div class="modalBox">
+    <h2>Paste .asset YAML</h2>
+    <textarea id="pasteArea" spellcheck="false" placeholder="%YAML 1.1&#10;%TAG !u! tag:unity3d.com,2011:&#10;--- !u!114 &amp;11400000&#10;MonoBehaviour:&#10;  ..."></textarea>
+    <div class="modalFoot">
+      <button data-close>Cancel</button>
+      <button class="primary" id="pasteGo">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- PNG generator modal -->
+<div class="modal" id="imgModal">
+  <div class="modalBox">
+    <h2>Generate from image</h2>
+    <div class="genRow"><label>Image</label><button id="pickImg">Choose PNG…</button><span id="imgName" class="mono dim"></span></div>
+    <div id="imgPrev"><canvas id="imgSrcCv" width="128" height="128" title="Source"></canvas><canvas id="imgMaskCv" width="128" height="128" title="Voxel silhouette preview"></canvas></div>
+    <div class="genRow"><label for="gSize">Size</label><input type="range" id="gSize" min="6" max="40" value="14"><output id="oSize">14</output></div>
+    <div class="genRow"><label for="gDepth">Depth</label><input type="range" id="gDepth" min="2" max="40" value="11"><output id="oDepth">11</output></div>
+    <div class="genRow"><label for="gAlpha">Alpha threshold</label><input type="range" id="gAlpha" min="0" max="100" value="35"><output id="oAlpha">0.35</output></div>
+    <div class="genRow"><label for="gSmooth">Smoothness</label><input type="range" id="gSmooth" min="0" max="100" value="47"><output id="oSmooth">47</output></div>
+    <div class="genRow"><label for="gRound">End rounding</label><input type="range" id="gRound" min="0" max="100" value="70"><output id="oRound">70</output></div>
+    <div class="genRow"><label for="gUnits">Auto-place units</label><input type="checkbox" id="gUnits" checked class="noflex"><span class="dim">from unit rules, one random spot per layer</span></div>
+    <p class="note">Approximates the Unity voxelizer: threshold + blur the alpha, extrude through depth with rounded ends, colour by onion-peel layer via layer rules. Hand-tune afterwards.</p>
+    <div class="modalFoot">
+      <button data-close>Cancel</button>
+      <button class="primary" id="genGo" disabled>Generate</button>
+    </div>
+  </div>
+</div>
+
+<!-- export modal -->
+<div class="modal" id="exportModal">
+  <div class="modalBox">
+    <h2>Export .asset</h2>
+    <p class="note" id="expMsg" style="margin-bottom:10px"></p>
+    <textarea id="expArea" readonly spellcheck="false"></textarea>
+    <div class="modalFoot">
+      <button id="expSave">Save as file…</button>
+      <button id="expDownload">Download again</button>
+      <button class="primary" id="expCopy">Copy YAML</button>
+      <button data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- shortcuts modal -->
+<div class="modal" id="helpModal">
+  <div class="modalBox">
+    <h2>Keyboard shortcuts</h2>
+    <table class="keys">
+      <tr><td><kbd>A</kbd></td><td>Build</td><td><kbd>B</kbd></td><td>Paint</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Rectangle</td><td><kbd>E</kbd></td><td>Erase</td></tr>
+      <tr><td><kbd>G</kbd></td><td>Fill</td><td><kbd>I</kbd></td><td>Pick colour</td></tr>
+      <tr><td><kbd>U</kbd></td><td>Unit</td><td><kbd>1–5</kbd></td><td>Colour 0–4</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Layer down / up</td><td><kbd>X</kbd> <kbd>Z</kbd></td><td>Toggle mirror X / Z</td></tr>
+      <tr><td><kbd>Ctrl/⌘ Z</kbd></td><td>Undo</td><td><kbd>Ctrl/⌘ Y</kbd></td><td>Redo</td></tr>
+      <tr><td><kbd>Ctrl/⌘ S</kbd></td><td>Export .asset</td><td><kbd>?</kbd></td><td>This help</td></tr>
+    </table>
+    <p class="note">3D view: left-click places / uses the active tool, right-click removes, left-drag orbits, right-drag pans, wheel zooms; “reset view” recentres the camera. Everything autosaves to this browser.</p>
+    <div class="modalFoot"><button class="primary" data-close>Close</button></div>
+  </div>
+</div>
+
+<div id="toast" role="status"></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

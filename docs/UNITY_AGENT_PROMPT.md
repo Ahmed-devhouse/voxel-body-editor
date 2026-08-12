@@ -78,7 +78,29 @@ sides together and re-run the web repo's round-trip tests.
 - **`layerRules`/`layerPatterns`/`unitRules`**: generator intent, not runtime
   data. The painted `units` grid is what plays.
 
-## Remaining Unity-side tasks (nice-to-haves — the pipeline already works)
+## Unity-side hardening: DONE (2026-08-12)
+
+Both items below were implemented in the Unity project and are committed there
+(`Add VoxelBody asset validator and a LevelSet add-level helper`):
+
+- **`Assets/VoxelVolley/Runtime/Core/VoxelBodyAudit.cs`** — engine-free, unit-tested
+  structural audit (grid length, colour bytes 0–5, unit kinds 1/4 only, orphan
+  units, stale `voxelCount`, name/file mismatch, off-spec size, shell accounting,
+  and the crate board resolved through `CellAt` so the Auto-inherits-Empty trap is
+  caught).
+- **`Assets/VoxelVolley/Editor/VoxelBodyValidator.cs`** — `Voxel Volley → Validate
+  Voxel Bodies → All In Project / Selected`, plus an `OnPostprocessAllAssets` hook
+  that validates on import. Balance is delegated to `CratePlanAnalysis`, not
+  reimplemented.
+- **`Assets/VoxelVolley/Editor/LevelSetTools.cs`** — `Voxel Volley → Add Selected
+  Bodies To Level Set`, validating first; `Append` is shared with
+  `VoxelBodySheetWindow` so the two paths can't drift.
+- **`Assets/VoxelVolley/Tests/Editor/VoxelBodyAuditTests.cs`** — 14 cases, all passing.
+
+Verified: all 111 existing bodies audit clean; six deliberately corrupted copies
+are each caught with an actionable message.
+
+## Historical: the tasks that produced the above
 
 1. **Editor validator** (`Assets/VoxelVolley/Editor/VoxelBodyValidator.cs`):
    menu item `Voxel Volley → Validate Voxel Bodies` scanning all `VoxelBody`

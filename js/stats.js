@@ -22,7 +22,7 @@
 // unambiguous structural faults, and says so rather than overclaiming.
 
 import { state, EMPTY, idx, unitCount, on } from './state.js';
-import { PALETTE, COLOUR_LABELS, CRATE_COLOURS } from './palette.js';
+import { PALETTE, labelOf, colourCount, CRATE_COLOURS, GAME_COLOURS } from './palette.js';
 
 const $ = id => document.getElementById(id);
 const FLAG_AUTO = 0, FLAG_EMPTY = 1 << 3;
@@ -31,11 +31,13 @@ const SHELL_PAD = 2;          // VoxelCore.ShellPad = 1 + ShellGap
 
 /* ---------- voxel censuses ---------- */
 function bodyCounts(){
-  const c = [0,0,0,0,0,0]; let other = 0;
+  const n = Math.max(GAME_COLOURS, colourCount());
+  const c = new Array(n).fill(0);
+  let other = 0;      // bytes with no palette entry at all
   for(let i=0;i<state.colours.length;i++){
     const v = state.colours[i];
     if(v === EMPTY) continue;
-    if(v < 6) c[v]++; else other++;
+    if(v < n) c[v]++; else other++;
   }
   c.other = other;
   return c;
@@ -157,10 +159,11 @@ export function updateStats(){
     (shelled ? '<th>+shell</th>' : '') +
     (custom ? '<th>opening</th><th>refill</th>' : '') + '</tr>';
   let totalOpening = 0;
+  const swatch = i => (PALETTE[i] ? PALETTE[i].hex : '#ff00ff');
   for(let i=0;i<CRATE_COLOURS;i++){
     totalOpening += opening[i];
     const short = custom && !unlimited[i] && need[i] > opening[i] + anyOpening;
-    html += `<tr><td><span class="cswatch" style="background:${PALETTE[i]}"></span>${COLOUR_LABELS[i]}</td>
+    html += `<tr><td><span class="cswatch" style="background:${swatch(i)}"></span>${labelOf(i)}</td>
       <td>${body[i]}</td>` +
       (shelled ? `<td>${i===0 ? shell.y : i===1 ? shell.o : 0}</td>` : '') +
       (custom ? `<td class="${short?'badA':''}">${opening[i]}</td>
@@ -168,9 +171,19 @@ export function updateStats(){
       '</tr>';
   }
   if(wild > 0)
-    html += `<tr><td><span class="cswatch" style="background:${PALETTE[5]}"></span>X</td>
+    html += `<tr><td><span class="cswatch" style="background:${swatch(5)}"></span>${labelOf(5)}</td>
       <td>${wild}</td>${shelled?'<td>0</td>':''}${custom?'<td colspan="2" style="text-align:left;color:var(--mut)">any bullet</td>':''}</tr>`;
-  const bodyTotal = body[0]+body[1]+body[2]+body[3]+body[4]+wild;
+  // colours past the game build get their own rows — they are unhittable, so
+  // they must never be quietly folded into a total that looks fine
+  let beyond = 0;
+  for(let i=GAME_COLOURS;i<body.length;i++){
+    if(!body[i]) continue;
+    beyond += body[i];
+    html += `<tr><td><span class="cswatch" style="background:${swatch(i)}"></span>${labelOf(i)}</td>
+      <td class="badA">${body[i]}</td>${shelled?'<td>0</td>':''}` +
+      (custom ? '<td colspan="2" style="text-align:left" class="badA">no crate can hit this</td>' : '') + '</tr>';
+  }
+  const bodyTotal = body[0]+body[1]+body[2]+body[3]+body[4]+wild+beyond;
   html += `<tr><td><b>total</b></td><td><b>${bodyTotal}</b></td>` +
     (shelled ? `<td><b>${shell.total}</b></td>` : '') +
     (custom ? `<td><b>${totalOpening + anyOpening}</b></td><td></td>` : '') + '</tr>';
@@ -184,8 +197,10 @@ export function updateStats(){
   if(bodyTotal === 0) warn.push('Model is empty — nothing to export.');
   if(state.N < 3 || state.N > 24)
     warn.push(`Size ${state.N} is outside VoxelBody's supported range (3–24) and will be clamped in Unity.`);
+  if(beyond)
+    warn.push(`${beyond} voxel(s) use colour ${GAME_COLOURS} or above. This game build renders those magenta and no crate can ever mint their colour, so the level cannot be cleared. Extend <b>Palette.Colours</b> and <b>Cols</b> in Unity (and <b>CrateColourCount</b> if they should be shootable), then raise GAME_COLOURS in palette.js.`);
   if(body.other)
-    warn.push(`${body.other} voxel(s) use colour values outside 0–5 — the game renders those magenta.`);
+    warn.push(`${body.other} voxel(s) use a colour byte with no palette entry at all — the game renders those magenta.`);
   const badKinds = badUnitKinds();
   if(badKinds.length)
     warn.push(`Unit kind ${badKinds.join(', ')} found — baked bodies only accept 1 (armoured) and 4 (hidden); 2 bomb / 3 rocket are boosters, never voxels.`);
@@ -213,7 +228,7 @@ export function updateStats(){
     const shortList = [];
     for(let i=0;i<CRATE_COLOURS;i++)
       if(!unlimited[i] && need[i] > opening[i] + anyOpening)
-        shortList.push(`${COLOUR_LABELS[i]} ${opening[i] + anyOpening}/${need[i]}`);
+        shortList.push(`${labelOf(i)} ${opening[i] + anyOpening}/${need[i]}`);
     if(shortList.length)
       warn.push(`Opening rounds don't cover every voxel of: ${shortList.join(', ')} (rounds/voxels, shell included) and no column refills those colours. Confirm with the Unity generator's balance probe before shipping — it simulates play, this panel only counts.`);
 

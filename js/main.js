@@ -6,9 +6,17 @@ import {
   voxelCount, serialize, deserialize,
 } from './state.js';
 import { parseAsset, exportAsset } from './asset.js';
-import { PALETTE, COLOUR_LABELS, COLOUR_NAMES, COLOUR_COUNT, setPaletteColour, resetPalette } from './palette.js';
-import { setTool, setColour, setSlice, flip, shiftGrid, rotateY, hollow, clearAll } from './tools.js';
-import { initSlice } from './slice.js';
+import {
+  PALETTE, GAME_COLOURS, MAX_COLOURS, colourCount, labelOf, isBeyondGame,
+  setPaletteColour, setPaletteLabel, addPaletteColour, removeLastPaletteColour, resetPalette,
+} from './palette.js';
+import {
+  setTool, setColour, setSlice, setSliceAxis, setBrush,
+  flip, shiftGrid, rotateY, hollow, clearAll,
+  copySlice, pasteSlice, duplicateSlice, clearSlice, fillSlice,
+  centreModel, trimToContent, replaceColour, deleteColour,
+} from './tools.js';
+import { initSlice, setReferenceImage } from './slice.js';
 import { initEditor3D, screenshot, setSpin, resetView } from './editor3d.js';
 import { maskFromImage, voxelize } from './voxelize.js';
 import { parseVox, voxToGrid } from './vox.js';
@@ -176,16 +184,9 @@ function wireToolRail(){
   document.querySelectorAll('.toolbtn').forEach(b =>
     b.addEventListener('click', () => setTool(b.dataset.tool)));
 
-  const pal = $('palette');
-  PALETTE.forEach((hex, i) => {
-    const b = document.createElement('button');
-    b.className = 'swatch';
-    b.style.background = hex;
-    b.title = COLOUR_LABELS[i] + ' — ' + COLOUR_NAMES[i] + ' (key ' + (i+1) + ')';
-    b.innerHTML = '<b>' + COLOUR_LABELS[i] + '</b>';
-    b.addEventListener('click', () => setColour(i));
-    pal.appendChild(b);
-  });
+  renderSwatches();
+  $('palAdd').addEventListener('click', addColour);
+  $('palDel').addEventListener('click', dropColour);
 
   $('unitKind').addEventListener('change', e => {
     sel.unitKind = Math.max(1, parseInt(e.target.value) || 1);
@@ -193,6 +194,8 @@ function wireToolRail(){
   });
   $('chkSymX').addEventListener('click', () => { sel.symX = !sel.symX; emit('sel'); });
   $('chkSymZ').addEventListener('click', () => { sel.symZ = !sel.symZ; emit('sel'); });
+  document.querySelectorAll('[data-brush]').forEach(b =>
+    b.addEventListener('click', () => setBrush(parseInt(b.dataset.brush))));
 
   document.querySelectorAll('[data-flip]').forEach(b =>
     b.addEventListener('click', () => flip(b.dataset.flip)));
@@ -206,6 +209,15 @@ function wireToolRail(){
     const n = hollow();
     toast(n ? 'Removed ' + n + ' interior voxels' : 'Nothing to hollow');
   });
+  $('btnCentre').addEventListener('click', () => {
+    const err = centreModel();
+    toast(err || 'Centred on the floor', !!err);
+  });
+  $('btnTrim').addEventListener('click', () => {
+    const before = state.N;
+    const err = trimToContent(0);
+    toast(err || `Trimmed ${before}³ → ${state.N}³ — coarser, cleaner voxels in play`, !!err);
+  });
   $('btnUndo').addEventListener('click', undo);
   $('btnRedo').addEventListener('click', redo);
   $('btnClear').addEventListener('click', () => { clearAll(); toast('Grid cleared (undo restores it)'); });
@@ -213,14 +225,87 @@ function wireToolRail(){
   on('sel', () => {
     document.querySelectorAll('.toolbtn').forEach(b =>
       b.classList.toggle('active', b.dataset.tool === sel.tool));
-    document.querySelectorAll('.swatch').forEach((s, i) =>
+    document.querySelectorAll('#palette .swatch').forEach((s, i) =>
       s.classList.toggle('active', i === sel.colour));
+    document.querySelectorAll('[data-brush]').forEach(b =>
+      b.classList.toggle('on', parseInt(b.dataset.brush) === sel.brush));
     $('chkSymX').classList.toggle('on', sel.symX);
     $('chkSymZ').classList.toggle('on', sel.symZ);
   });
-  on('palette', () => {
-    document.querySelectorAll('#palette .swatch').forEach((s, i) => s.style.background = PALETTE[i]);
+  on('palette', () => { renderSwatches(); renderPaletteEditor(); renderColourSelects(); });
+}
+
+/* ---------- palette ---------- */
+function renderSwatches(){
+  const pal = $('palette');
+  pal.innerHTML = '';
+  PALETTE.forEach((entry, i) => {
+    const b = document.createElement('button');
+    b.className = 'swatch' + (i === sel.colour ? ' active' : '') + (isBeyondGame(i) ? ' beyond' : '');
+    b.style.background = entry.hex;
+    b.title = entry.label + ' — ' + entry.name + (i < 9 ? ' (key ' + (i+1) + ')' : '') +
+      (isBeyondGame(i) ? ' — beyond this game build' : '');
+    b.innerHTML = '<b>' + escapeHtml(entry.label) + '</b>';
+    b.addEventListener('click', () => setColour(i));
+    pal.appendChild(b);
   });
+  $('palDel').disabled = colourCount() <= GAME_COLOURS;
+  $('palAdd').disabled = colourCount() >= MAX_COLOURS;
+}
+function addColour(){
+  const i = addPaletteColour();
+  if(i < 0){ toast('Palette is full (' + MAX_COLOURS + ' colours)', true); return; }
+  setColour(i);
+  toast('Added colour ' + i + ' — the game build only renders 0–' + (GAME_COLOURS-1) +
+        ', so extend Palette.cs and Cols before shipping it', true);
+}
+function dropColour(){
+  const last = colourCount() - 1;
+  let used = 0;
+  for(let k=0;k<state.colours.length;k++) if(state.colours[k] === last) used++;
+  if(used && !confirm(`${used} voxel(s) use colour ${last}. Removing it leaves them showing as unknown. Remove anyway?`)) return;
+  if(!removeLastPaletteColour()){ toast('The first ' + GAME_COLOURS + ' colours are the game\'s own', true); return; }
+  if(sel.colour >= colourCount()) setColour(colourCount()-1);
+  toast('Removed the last colour');
+}
+function renderPaletteEditor(){
+  const pe = $('palEdit');
+  if(!pe) return;
+  pe.innerHTML = '';
+  PALETTE.forEach((entry, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'pe' + (isBeyondGame(i) ? ' beyond' : '');
+    const inp = document.createElement('input');
+    inp.type = 'color'; inp.value = entry.hex;
+    inp.title = 'Colour ' + i + ' — ' + entry.name;
+    inp.addEventListener('input', () => setPaletteColour(i, inp.value));
+    const lab = document.createElement('input');
+    lab.type = 'text'; lab.value = entry.label; lab.maxLength = 3;
+    lab.title = 'Short label for colour ' + i;
+    lab.addEventListener('change', () => setPaletteLabel(i, lab.value));
+    const num = document.createElement('span');
+    num.className = 'idxLbl'; num.textContent = i;
+    wrap.append(inp, lab, num);
+    pe.appendChild(wrap);
+  });
+  const note = $('palNote');
+  if(note) note.innerHTML = 'Exports store colour <b>indices</b>, never hex — index 0 is the game\'s Y. ' +
+    'Colours 0–' + (GAME_COLOURS-1) + ' are what the shipped build understands (0–4 are crate colours, 5 is the X wildcard any bullet clears). ' +
+    'Anything past that is marked in red: you can paint and export it, but the game renders it magenta and no crate can ever hit it until ' +
+    '<b>Palette.Colours</b> and <b>Cols</b> are extended in Unity.';
+}
+function renderColourSelects(){
+  const opts = PALETTE.map((e,i) =>
+    `<option value="${i}">${i} ${escapeHtml(e.label)}${isBeyondGame(i) ? ' ⚠' : ''}</option>`).join('');
+  for(const id of ['swapFrom','swapTo','delColour']){
+    const el = $(id);
+    if(!el) continue;
+    const keep = el.value;
+    el.innerHTML = opts;
+    if(keep !== '' && +keep < colourCount()) el.value = keep;
+  }
+  const sf = $('swapFrom'), st = $('swapTo');
+  if(sf && st && sf.value === st.value && colourCount() > 1) st.value = String((+sf.value + 1) % colourCount());
 }
 
 /* =====================================================================
@@ -231,9 +316,53 @@ function wirePaneToggles(){
   $('chkOnion').addEventListener('change', e => { sel.onion = e.target.checked; emit('sel'); });
   $('chkCoords').addEventListener('change', e => { sel.coords = e.target.checked; emit('sel'); });
   $('chkHiLayer').addEventListener('change', e => { sel.hiLayer = e.target.checked; emit('sel'); });
+  $('chkIsolate').addEventListener('change', e => {
+    sel.isolate = e.target.checked;
+    emit('sel'); emit('grid');   // the 3D mesh has to be rebuilt, not just recoloured
+  });
   $('chkSpin').addEventListener('change', e => setSpin(e.target.checked));
   $('btnResetView').addEventListener('click', resetView);
+
+  // slice axis
+  document.querySelectorAll('[data-axis]').forEach(b =>
+    b.addEventListener('click', () => setSliceAxis(b.dataset.axis)));
+
+  // slice operations
+  const op = (id, fn) => $(id).addEventListener('click', fn);
+  op('opCopy', () => { copySlice(); toast('Slice copied'); });
+  op('opPaste', () => { const e = pasteSlice(); toast(e || 'Slice pasted', !!e); });
+  op('opDupUp', () => { const e = duplicateSlice(1); toast(e || 'Duplicated upward', !!e); });
+  op('opDupDown', () => { const e = duplicateSlice(-1); toast(e || 'Duplicated downward', !!e); });
+  op('opFill', () => { const e = fillSlice(); toast(e || 'Slice filled', !!e); });
+  op('opClear', () => { const e = clearSlice(); toast(e || 'Slice cleared', !!e); });
+
+  // tracing image
+  $('btnRefImg').addEventListener('click', () => {
+    if(hasRef){ setReferenceImage(null); hasRef = false; $('btnRefImg').classList.remove('on'); toast('Tracing image removed'); }
+    else $('fileRef').click();
+  });
+  $('fileRef').addEventListener('change', e => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if(!f) return;
+    const img = new Image();
+    const url = URL.createObjectURL(f);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      setReferenceImage(img);
+      hasRef = true;
+      $('btnRefImg').classList.add('on');
+      toast('Tracing ' + f.name + ' — try the front view (key 8) for a side-on sprite');
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); toast('Could not load that image', true); };
+    img.src = url;
+  });
+  $('refOpacity').addEventListener('input', e => {
+    sel.refOpacity = Math.max(0.05, Math.min(0.9, parseInt(e.target.value)/100));
+    emit('sel');
+  });
 }
+let hasRef = false;
 
 /* =====================================================================
    Inspector: model tab
@@ -282,24 +411,28 @@ function wireModelTab(){
     $('fSize').value = state.N;
   });
 
-  // display palette editor
-  const pe = $('palEdit');
-  for(let i=0; i<COLOUR_COUNT; i++){
-    const wrap = document.createElement('div');
-    wrap.className = 'pe';
-    const inp = document.createElement('input');
-    inp.type = 'color';
-    inp.value = PALETTE[i];
-    inp.addEventListener('input', () => setPaletteColour(i, inp.value));
-    wrap.appendChild(inp);
-    wrap.appendChild(Object.assign(document.createElement('span'), { textContent: COLOUR_LABELS[i] }));
-    pe.appendChild(wrap);
-  }
+  renderPaletteEditor();
+  renderColourSelects();
+  $('palAdd2').addEventListener('click', addColour);
   $('palReset').addEventListener('click', () => {
     resetPalette();
-    document.querySelectorAll('#palEdit input').forEach((inp, i) => inp.value = PALETTE[i]);
-    toast('Palette reset');
+    if(sel.colour >= colourCount()) setColour(colourCount()-1);
+    toast('Palette reset to the game\'s six colours');
   });
+
+  // recolour
+  $('btnSwap').addEventListener('click', () => {
+    const from = +$('swapFrom').value, to = +$('swapTo').value;
+    if(from === to){ toast('Pick two different colours', true); return; }
+    const n = replaceColour(from, to);
+    toast(n ? `Repainted ${n} voxel(s) ${labelOf(from)} → ${labelOf(to)}` : `No ${labelOf(from)} voxels to repaint`, !n);
+  });
+  $('btnDelColour').addEventListener('click', () => {
+    const c = +$('delColour').value;
+    const n = deleteColour(c);
+    toast(n ? `Deleted ${n} ${labelOf(c)} voxel(s)` : `No ${labelOf(c)} voxels`, !n);
+  });
+
   on('gridsize', () => { $('fSize').value = state.N; });
 }
 
@@ -309,7 +442,7 @@ function wireModelTab(){
 function colourOptions(v){
   // layer rules may use any voxel colour, X wildcard included (Range(0,5) in Unity)
   let h = '';
-  for(let i=0;i<COLOUR_COUNT;i++) h += `<option value="${i}" ${v===i?'selected':''}>${COLOUR_LABELS[i]}</option>`;
+  for(let i=0;i<colourCount();i++) h += `<option value="${i}" ${v===i?'selected':''}>${labelOf(i)}</option>`;
   return h;
 }
 function renderRules(){
@@ -510,10 +643,18 @@ function wireKeyboard(){
     if(e.target.matches('textarea, select, input[type=text], input[type=number], input[type=search]')) return;
     if((e.ctrlKey || e.metaKey) && k === 'z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
     if((e.ctrlKey || e.metaKey) && k === 'y'){ e.preventDefault(); redo(); return; }
+    if((e.ctrlKey || e.metaKey) && k === 'c'){ e.preventDefault(); copySlice(); toast('Slice copied'); return; }
+    if((e.ctrlKey || e.metaKey) && k === 'v'){
+      e.preventDefault();
+      const err = pasteSlice();
+      toast(err || 'Slice pasted', !!err);
+      return;
+    }
     if(e.ctrlKey || e.metaKey) return;
     if(k === 'a') setTool('build');
     else if(k === 'b') setTool('paint');
     else if(k === 'r') setTool('rect');
+    else if(k === 'l') setTool('line');
     else if(k === 'e') setTool('erase');
     else if(k === 'g') setTool('fill');
     else if(k === 'i') setTool('pick');
@@ -522,8 +663,18 @@ function wireKeyboard(){
     else if(k === ']') setSlice(sel.slice + 1);
     else if(k === 'x'){ sel.symX = !sel.symX; emit('sel'); }
     else if(k === 'z'){ sel.symZ = !sel.symZ; emit('sel'); }
+    else if(k === 'h'){
+      sel.isolate = !sel.isolate;
+      $('chkIsolate').checked = sel.isolate;
+      emit('sel'); emit('grid');
+    }
+    else if(k === '-' || k === '_') setBrush(sel.brush - 1);
+    else if(k === '+' || k === '=') setBrush(sel.brush + 1);
+    else if(k === '7') setSliceAxis('y');
+    else if(k === '8') setSliceAxis('z');
+    else if(k === '9') setSliceAxis('x');
     else if(k === '?') openModal('helpModal');
-    else if(k >= '1' && k <= '6') setColour(parseInt(k) - 1);
+    else if(k >= '1' && k <= '6') setColour(Math.min(colourCount()-1, parseInt(k) - 1));
   });
 }
 

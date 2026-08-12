@@ -33,6 +33,7 @@
   <input type="file" id="fileAsset" accept="*/*" hidden>
   <input type="file" id="fileImage" accept="image/*" hidden>
   <input type="file" id="fileVox" accept=".vox" hidden>
+  <input type="file" id="fileRef" accept="image/*" hidden>
 </header>
 
 <div id="main">
@@ -42,8 +43,10 @@
       <svg viewBox="0 0 24 24"><path d="M12 3l7 4v7l-7 4-7-4V7z"/><path d="M12 11l7-4M12 11L5 7M12 11v7"/></svg><span>BUILD</span></button>
     <button class="toolbtn" data-tool="paint" title="Paint (B) — recolours cubes; right-click erases">
       <svg viewBox="0 0 24 24"><path d="M15 4l5 5-9.5 9.5a2 2 0 0 1-1 .5l-4 .8.8-4a2 2 0 0 1 .5-1z"/></svg><span>PAINT</span></button>
-    <button class="toolbtn" data-tool="rect" title="Rectangle (R) — drag a filled rectangle in the layer editor">
+    <button class="toolbtn" data-tool="rect" title="Rectangle (R) — drag a filled rectangle in the slice editor">
       <svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/></svg><span>RECT</span></button>
+    <button class="toolbtn" data-tool="line" title="Line (L) — drag a straight line in the slice editor">
+      <svg viewBox="0 0 24 24"><path d="M5 19L19 5"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/></svg><span>LINE</span></button>
     <button class="toolbtn" data-tool="erase" title="Erase (E)">
       <svg viewBox="0 0 24 24"><path d="M9 15l7-7 4 4-7 7H9l-3-3 3-3z"/><path d="M4 20h16"/></svg><span>ERASE</span></button>
     <button class="toolbtn" data-tool="fill" title="Fill (G) — flood fill; connected region in 3D, area in the layer editor">
@@ -57,8 +60,20 @@
       <option value="4">hidn</option>
     </select><span class="railhead">kind</span></div>
 
+    <div class="railhead">Brush</div>
+    <div class="brushRow" id="brushRow">
+      <button class="minibtn brushBtn on" data-brush="1" title="Single cell (key -/+ to change)">1</button>
+      <button class="minibtn brushBtn" data-brush="2" title="3×3">2</button>
+      <button class="minibtn brushBtn" data-brush="3" title="5×5">3</button>
+      <button class="minibtn brushBtn" data-brush="4" title="7×7">4</button>
+    </div>
+
     <div class="railhead">Colours</div>
     <div id="palette"></div>
+    <div class="palBtns">
+      <button class="minibtn" id="palAdd" title="Add a colour to the palette">+ col</button>
+      <button class="minibtn" id="palDel" title="Remove the last extra colour">− col</button>
+    </div>
 
     <div class="railhead">Mirror</div>
     <button class="minibtn tgl" id="chkSymX" title="Mirror edits left–right (X)">sym X</button>
@@ -70,6 +85,8 @@
     <button class="minibtn" data-flip="z" title="Flip front–back">flip Z</button>
     <button class="minibtn" id="btnRotateY" title="Rotate 90° around the vertical axis">rot 90</button>
     <button class="minibtn" id="btnHollow" title="Remove fully-enclosed interior voxels">hollow</button>
+    <button class="minibtn" id="btnCentre" title="Centre horizontally and drop onto the floor">centre</button>
+    <button class="minibtn" id="btnTrim" title="Shrink the grid to fit the model — coarser, cleaner voxels in play">trim</button>
     <div class="railhead">Shift</div>
     <div class="shiftgrid">
       <button class="minibtn" data-shift="x,-1" title="Shift −X">x−</button>
@@ -87,23 +104,40 @@
 
   <!-- workspace -->
   <div id="workspace">
-    <section class="pane" aria-label="Layer editor">
+    <section class="pane" aria-label="Slice editor">
       <div class="panehead">
-        Layer editor · top view, bottom → up
+        <span class="axisBtns">
+          <button class="minibtn on" data-axis="y" title="Top view — stack layers bottom-up (key 7)">top</button>
+          <button class="minibtn" data-axis="z" title="Front view — the elevation a sprite is drawn in (key 8)">front</button>
+          <button class="minibtn" data-axis="x" title="Side view (key 9)">side</button>
+        </span>
+        <span id="sliceAxisLabel">top view, bottom → up</span>
         <label class="chk"><input type="checkbox" id="chkOnion" checked> onion</label>
         <label class="chk"><input type="checkbox" id="chkCoords"> coords</label>
       </div>
       <div class="panebody" id="slicePane"><canvas id="sliceCanvas"></canvas></div>
+      <div id="sliceOps">
+        <button class="minibtn" id="opCopy" title="Copy this slice (Ctrl/⌘+C)">copy</button>
+        <button class="minibtn" id="opPaste" title="Paste onto this slice (Ctrl/⌘+V)">paste</button>
+        <button class="minibtn" id="opDupUp" title="Copy this slice onto the next one and follow it">dup ▲</button>
+        <button class="minibtn" id="opDupDown" title="Copy this slice onto the previous one and follow it">dup ▼</button>
+        <button class="minibtn" id="opFill" title="Fill the whole slice with the active colour">fill</button>
+        <button class="minibtn danger" id="opClear" title="Empty this slice">clear</button>
+        <span class="spacer"></span>
+        <button class="minibtn" id="btnRefImg" title="Load a PNG to trace over in this view">trace…</button>
+        <input type="range" id="refOpacity" min="5" max="90" value="35" title="Tracing image strength" aria-label="Tracing image opacity">
+      </div>
       <div id="sliceFoot">
         <span id="sliceLbl">y 00/13</span>
-        <input type="range" id="sliceRange" min="0" max="13" value="7" aria-label="Height layer (0 = bottom)">
-        <div id="occ" title="Voxels per layer — click to jump"></div>
+        <input type="range" id="sliceRange" min="0" max="13" value="7" aria-label="Slice index">
+        <div id="occ" title="Voxels per slice — click to jump"></div>
       </div>
     </section>
     <section class="pane" aria-label="3D editor">
       <div class="panehead">
         3D editor
-        <label class="chk"><input type="checkbox" id="chkHiLayer"> highlight layer</label>
+        <label class="chk"><input type="checkbox" id="chkHiLayer"> highlight slice</label>
+        <label class="chk"><input type="checkbox" id="chkIsolate" title="Hide everything past the current slice so you can build inside"> isolate</label>
         <label class="chk"><input type="checkbox" id="chkSpin"> spin</label>
         <button class="minibtn" id="btnResetView" title="Reset camera">reset view</button>
       </div>
@@ -136,10 +170,15 @@
       <div class="sechead">Gameplay</div>
       <div class="frow"><label for="fShell">Wrap in shell</label><input type="checkbox" id="fShell"></div>
       <div class="frow"><label for="fMisplay">Misplay tolerance (0–0.5)</label><input type="number" id="fMisplay" min="0" max="0.5" step="0.01"></div>
-      <div class="sechead">Display palette (this browser only)</div>
+      <div class="sechead">Palette <span><button id="palAdd2" title="Add a colour">+ colour</button> <button id="palReset">Reset</button></span></div>
       <div id="palEdit" class="palEdit"></div>
-      <div class="frow"><span class="note" style="margin:0">Exports store colour indices, never hex — match these to the game's real colours.</span>
-        <button id="palReset">Reset</button></div>
+      <p class="note" id="palNote"></p>
+      <div class="sechead">Recolour</div>
+      <div class="frow"><label>Swap</label><span>
+        <select id="swapFrom"></select> → <select id="swapTo"></select>
+        <button id="btnSwap" title="Repaint every voxel of the first colour">go</button></span></div>
+      <div class="frow"><label for="delColour">Delete every voxel of</label><span>
+        <select id="delColour"></select> <button id="btnDelColour" class="danger" title="Erase those voxels">go</button></span></div>
       <div class="sechead">Unity wiring</div>
       <div class="frow"><label for="fGuid">Script GUID</label><input type="text" id="fGuid" spellcheck="false" title="GUID of VoxelBody.cs from your project's .meta file"></div>
       <p class="note">The script GUID ties the asset to <b>VoxelVolley.VoxelBody</b> in Unity. Pre-filled from your existing assets — leave it unless the .meta GUID changes. Source image references are preserved on import and exported as-is.</p>
@@ -235,10 +274,13 @@
     <h2>Keyboard shortcuts</h2>
     <table class="keys">
       <tr><td><kbd>A</kbd></td><td>Build</td><td><kbd>B</kbd></td><td>Paint</td></tr>
-      <tr><td><kbd>R</kbd></td><td>Rectangle</td><td><kbd>E</kbd></td><td>Erase</td></tr>
-      <tr><td><kbd>G</kbd></td><td>Fill</td><td><kbd>I</kbd></td><td>Pick colour</td></tr>
-      <tr><td><kbd>U</kbd></td><td>Unit</td><td><kbd>1–6</kbd></td><td>Colour Y O R G B X</td></tr>
-      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Layer down / up</td><td><kbd>X</kbd> <kbd>Z</kbd></td><td>Toggle mirror X / Z</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Rectangle</td><td><kbd>L</kbd></td><td>Line</td></tr>
+      <tr><td><kbd>E</kbd></td><td>Erase</td><td><kbd>G</kbd></td><td>Fill</td></tr>
+      <tr><td><kbd>I</kbd></td><td>Pick colour</td><td><kbd>U</kbd></td><td>Unit</td></tr>
+      <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>Colour Y O R G B X</td><td><kbd>−</kbd> <kbd>+</kbd></td><td>Brush size</td></tr>
+      <tr><td><kbd>7</kbd> <kbd>8</kbd> <kbd>9</kbd></td><td>Top / front / side view</td><td><kbd>[</kbd> <kbd>]</kbd></td><td>Slice down / up</td></tr>
+      <tr><td><kbd>X</kbd> <kbd>Z</kbd></td><td>Toggle mirror X / Z</td><td><kbd>H</kbd></td><td>Isolate (see inside)</td></tr>
+      <tr><td><kbd>Ctrl/⌘ C</kbd></td><td>Copy slice</td><td><kbd>Ctrl/⌘ V</kbd></td><td>Paste slice</td></tr>
       <tr><td><kbd>Ctrl/⌘ Z</kbd></td><td>Undo</td><td><kbd>Ctrl/⌘ Y</kbd></td><td>Redo</td></tr>
       <tr><td><kbd>Ctrl/⌘ S</kbd></td><td>Export .asset</td><td><kbd>?</kbd></td><td>This help</td></tr>
     </table>

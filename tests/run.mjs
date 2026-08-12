@@ -151,6 +151,133 @@ console.log('unity axis convention');
   check('bird first solid cell is (1,8,3) = R', bird.colours[311] === 2);
 }
 
+/* ---------- 3b-bis. slice-view axis mapping is a bijection in all three views ---------- */
+console.log('slice axis mapping');
+{
+  const st = await import(join(root, 'js/state.js'));
+  const { state, sel, idx, sliceToCell, cellToSlice, sliceIdx } = st;
+  let allOk = true, inverseOk = true, agreeOk = true;
+  for(const n of [3, 4, 7, 14, 24]){
+    state.N = n;
+    for(const axis of ['y','z','x']){
+      sel.sliceAxis = axis;
+      const seen = new Set();
+      for(let s=0; s<n; s++) for(let row=0; row<n; row++) for(let col=0; col<n; col++){
+        const [x,y,z] = sliceToCell(col, row, s);
+        if(x<0||y<0||z<0||x>=n||y>=n||z>=n){ allOk = false; continue; }
+        const i = idx(x,y,z);
+        if(seen.has(i)) allOk = false;      // two slice coords hitting one cell
+        seen.add(i);
+        const back = cellToSlice(x,y,z);
+        if(back.col!==col || back.row!==row || back.s!==s) inverseOk = false;
+        if(sliceIdx(col,row,s) !== i) agreeOk = false;
+      }
+      if(seen.size !== n*n*n) allOk = false;   // must cover every cell exactly once
+    }
+  }
+  check('every slice coord maps to a distinct cell, covering the grid', allOk);
+  check('cellToSlice inverts sliceToCell in all views', inverseOk);
+  check('sliceIdx agrees with idx(sliceToCell(...))', agreeOk);
+
+  // the y view must keep its documented meaning: slice = height, row = depth
+  state.N = 14; sel.sliceAxis = 'y';
+  check('top view: slice is height, row is depth',
+    JSON.stringify(sliceToCell(1,3,8)) === JSON.stringify([1,8,3]));
+  // the front view must put row 0 at the TOP of the screen (highest y)
+  sel.sliceAxis = 'z';
+  check('front view: row 0 is the top of the model',
+    sliceToCell(0,0,0)[1] === 13 && sliceToCell(0,13,0)[1] === 0);
+  sel.sliceAxis = 'y';
+}
+
+/* ---------- 3b-ter. slice ops and model ops ---------- */
+console.log('slice + model ops');
+{
+  const st = await import(join(root, 'js/state.js'));
+  const tools = await import(join(root, 'js/tools.js'));
+  const { state, sel, idx, EMPTY: E } = st;
+
+  const build = (n, fn) => {
+    state.N = n;
+    state.colours = new Uint8Array(n*n*n).fill(E);
+    state.units = new Uint8Array(n*n*n);
+    for(let z=0;z<n;z++) for(let y=0;y<n;y++) for(let x=0;x<n;x++){
+      const v = fn(x,y,z);
+      if(v !== undefined) state.colours[idx(x,y,z)] = v;
+    }
+    st.clearHistory();
+  };
+  const count = () => state.colours.reduce((a,v) => a + (v!==E?1:0), 0);
+
+  // copy a slice, paste it elsewhere, and confirm it landed verbatim
+  build(6, (x,y,z) => y === 0 ? 2 : undefined);      // a floor plate
+  sel.sliceAxis = 'y'; sel.slice = 0;
+  tools.copySlice();
+  sel.slice = 3;
+  check('paste onto an empty slice', tools.pasteSlice() === null);
+  let plate = true;
+  for(let z=0;z<6;z++) for(let x=0;x<6;x++) if(state.colours[idx(x,3,z)] !== 2) plate = false;
+  check('pasted slice matches the source exactly', plate);
+
+  // a paste from another view is refused rather than silently transposed
+  sel.sliceAxis = 'z';
+  check('cross-view paste refused', typeof tools.pasteSlice() === 'string');
+  sel.sliceAxis = 'y';
+
+  // duplicate follows the slice it wrote
+  build(6, (x,y,z) => y === 2 ? 3 : undefined);
+  sel.slice = 2;
+  check('duplicate upward succeeds', tools.duplicateSlice(1) === null);
+  check('duplicate moved the cursor with it', sel.slice === 3);
+  check('duplicate copied the content', state.colours[idx(0,3,0)] === 3);
+  check('duplicate past the top is refused', (sel.slice = 5, typeof tools.duplicateSlice(1) === 'string'));
+
+  // trim: a 4³ blob inside a 14³ grid should shrink to 4³ and keep every voxel
+  build(14, (x,y,z) => (x>=5&&x<9 && y>=6&&y<10 && z>=5&&z<9) ? 1 : undefined);
+  const before = count();
+  check('trim reports success', tools.trimToContent(0) === null);
+  check('trim shrank the grid to fit', state.N === 4, 'N=' + state.N);
+  check('trim kept every voxel', count() === before, `${count()} vs ${before}`);
+  check('trim dropped the model onto the floor', state.colours[idx(0,0,0)] === 1);
+
+  // centre: an off-centre blob lands centred and on the floor
+  build(8, (x,y,z) => (x<2 && y>=4&&y<6 && z<2) ? 4 : undefined);
+  check('centre reports success', tools.centreModel() === null);
+  const b = tools.bounds();
+  check('centre put it on the floor', b.y0 === 0, 'y0=' + b.y0);
+  check('centre balanced x', b.x0 === 7 - b.x1, `x ${b.x0}..${b.x1}`);
+  check('centre balanced z', b.z0 === 7 - b.z1, `z ${b.z0}..${b.z1}`);
+
+  // replace / delete colour
+  build(4, () => 2);
+  check('replaceColour reports the count', tools.replaceColour(2, 3) === 64);
+  check('replaceColour actually repainted', state.colours.every(v => v === 3));
+  check('replaceColour on an absent colour is a no-op', tools.replaceColour(0, 1) === 0);
+  check('deleteColour empties them', tools.deleteColour(3) === 64 && count() === 0);
+
+  // brush footprint: a 3×3 patch on an empty slice
+  build(6, () => undefined);
+  sel.sliceAxis = 'y'; sel.slice = 0; sel.tool = 'paint'; sel.colour = 1;
+  sel.brush = 2; sel.symX = false; sel.symZ = false;
+  tools.sliceAction(2, 2, false);
+  check('brush 2 covers 3×3', count() === 9, String(count()));
+  sel.brush = 1;
+
+  // brush clips at the grid edge rather than wrapping
+  build(6, () => undefined);
+  sel.brush = 3;
+  tools.sliceAction(0, 0, false);
+  check('brush clips at the edge', count() === 9, String(count()));   // quarter of 5×5
+  sel.brush = 1;
+
+  // symmetry is world-space: mirroring X in the top view must mirror columns
+  build(6, () => undefined);
+  sel.symX = true;
+  tools.sliceAction(1, 2, false);
+  check('mirror X paints both sides', state.colours[idx(1,0,2)] === 1 && state.colours[idx(4,0,2)] === 1);
+  sel.symX = false;
+}
+
 /* ---------- 3c. every asset in the Unity project round-trips ---------- */
 {
   const projDir = '/Users/muhammadahmad/Unity-projects/Voxel_Volley/Assets/VoxelVolley/VoxelBodies';

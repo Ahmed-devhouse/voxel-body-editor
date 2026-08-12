@@ -44,10 +44,16 @@ export const state = {
 // UI selection state (not persisted in the asset)
 export const sel = {
   tool: 'build', lastColourTool: 'build', colour: 2, unitKind: 1,
-  slice: 7,                 // height layer, 0 = bottom
+  slice: 7,                 // index along sliceAxis
+  sliceAxis: 'y',           // 'y' top view, 'z' front view, 'x' side view
+  brush: 1,                 // brush radius in cells: 1 = single cell, 2 = 3×3, 3 = 5×5
   symX: false, symZ: false,
-  onion: true, coords: false, hiLayer: false,
+  onion: true, coords: false, hiLayer: false, isolate: false,
+  refOpacity: 0.35,         // tracing-image strength in the slice view
 };
+
+// Clipboard for layer copy/paste — {axis, n, colours, units}
+export const clip = { axis: null, n: 0, colours: null, units: null };
 
 /* ---------- events ---------- */
 const bus = new EventTarget();
@@ -68,10 +74,41 @@ export function on(type, fn){ bus.addEventListener(type, e => fn(e.detail)); }
      y = height (world Y, UP — y = 0 is the BOTTOM layer)
      z = depth  (world Z, front–back; fastest axis)                         */
 export const idx = (x,y,z) => (x*state.N + y)*state.N + z;
-// layer editor: slice s = height layer y (0 = bottom), viewed from above.
-// screen col = x (width), screen row = z (depth)
-export const sliceIdx = (cx,cy,s) => (cx*state.N + s)*state.N + cy;
 export const inBounds = (x,y,z) => x>=0 && y>=0 && z>=0 && x<state.N && y<state.N && z<state.N;
+
+/* ---------- slice views ----------
+   The slice editor can cut along any axis. One mapping serves all three, so
+   every tool works identically in each view:
+
+     axis 'y'  top view    col = x, row = z,       slice = y   (row 0 = back)
+     axis 'z'  front view  col = x, row = N-1-y,   slice = z   (row 0 = top)
+     axis 'x'  side view   col = z, row = N-1-y,   slice = x   (row 0 = top)
+
+   'y' keeps the bottom-up stacking the layer editor started with; 'z' and 'x'
+   put row 0 at the top of the screen, which is how a front or side elevation
+   reads.                                                                  */
+export function sliceToCell(col, row, s, axis = sel.sliceAxis){
+  const N = state.N;
+  if(axis === 'z') return [col, N-1-row, s];
+  if(axis === 'x') return [s, N-1-row, col];
+  return [col, s, row];                       // 'y'
+}
+export function cellToSlice(x, y, z, axis = sel.sliceAxis){
+  const N = state.N;
+  if(axis === 'z') return { col: x, row: N-1-y, s: z };
+  if(axis === 'x') return { col: z, row: N-1-y, s: x };
+  return { col: x, row: z, s: y };            // 'y'
+}
+export function sliceIdx(col, row, s, axis = sel.sliceAxis){
+  const [x,y,z] = sliceToCell(col, row, s, axis);
+  return idx(x,y,z);
+}
+/** Human label for the current slice axis, used by the view header and slider. */
+export function axisInfo(axis = sel.sliceAxis){
+  if(axis === 'z') return { letter: 'z', title: 'front view, back → front', cols: 'x', rows: 'y' };
+  if(axis === 'x') return { letter: 'x', title: 'side view, left → right',  cols: 'z', rows: 'y' };
+  return { letter: 'y', title: 'top view, bottom → up', cols: 'x', rows: 'z' };
+}
 
 /* ---------- undo / redo ---------- */
 const undoStack = [], redoStack = [];

@@ -8,7 +8,7 @@
 //   - crates carry colours 0–4 (Y O R G B) or −1 = demand-weighted
 
 import { state, emit, EMPTY } from './state.js';
-import { PALETTE, COLOUR_LABELS, CRATE_COLOURS } from './palette.js';
+import { PALETTE, labelOf, CRATE_COLOURS } from './palette.js';
 import { toast } from './ui.js';
 
 const $ = id => document.getElementById(id);
@@ -24,7 +24,7 @@ const autoCell = () => ({colour:-1, rounds:0, chain:0, flags:0});
 function colourOptions(selVal){
   let h = `<option value="-1" ${selVal===-1?'selected':''}>any</option>`;
   for(let i=0;i<CRATE_COLOURS;i++)
-    h += `<option value="${i}" ${selVal===i?'selected':''}>${COLOUR_LABELS[i]}</option>`;
+    h += `<option value="${i}" ${selVal===i?'selected':''}>${labelOf(i)}</option>`;
   return h;
 }
 
@@ -57,7 +57,7 @@ function slotCard(list, i, rowLabel){
   const commit = () => { if(list[i] !== cell){ ensureLength(list, i); list[i] = cell; } };
   const d = document.createElement('div');
   d.className = 'crateCell';
-  const sw = cell.colour>=0 && cell.colour<CRATE_COLOURS ? PALETTE[cell.colour] : '#5b6272';
+  const sw = cell.colour>=0 && cell.colour<CRATE_COLOURS ? PALETTE[cell.colour].hex : '#5b6272';
   d.innerHTML = `<span class="idx">${rowLabel}</span>
     <div class="row"><span class="cswatch" style="background:${sw}"></span><select data-k="colour" title="Crate colour">${colourOptions(cell.colour)}</select></div>
     <div class="row"><label>rnd</label><input type="number" value="${cell.rounds}" min="0" data-k="rounds" title="Rounds this crate carries; 0 = game default"></div>
@@ -160,6 +160,6 @@ export function initCrates(){
     state.meta.crateCells = cells.slice(0, total);
     ensureLength(state.meta.crateCells, total);
     renderCrates(); emit('meta');
-    toast('Filled ' + total + ' crates from voxel demand (flags left on Auto)');
+    toast('Filled ' + total + ' crates from voxel demand (flagged Plain so they cannot inherit Empty)');
   });
 }

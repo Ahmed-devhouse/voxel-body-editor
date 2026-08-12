@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
-import { state, sel, EMPTY, idx, on } from './state.js';
+import { state, sel, EMPTY, idx, on, cellToSlice } from './state.js';
 import { colHex } from './palette.js';
 import { hit3DAction, setSlice } from './tools.js';
 
@@ -174,6 +174,9 @@ function rebuild(){
   for(let z=0; z<N; z++) for(let y=0; y<N; y++) for(let x=0; x<N; x++){
     const i = idx(x,y,z);
     if(c[i] === EMPTY) continue;
+    // isolate: hide everything past the current slice so the inside is visible
+    // and clickable, instead of only ever reaching the outer shell
+    if(sel.isolate && cellToSlice(x,y,z).s > sel.slice) continue;
     _m.makeTranslation(x-center(), y+0.5, z-center());
     voxMesh.setMatrixAt(count, _m);
     cellOfInstance[count] = i;
@@ -192,9 +195,10 @@ function applyColours(count){
   const N = state.N;
   for(let k=0; k<count; k++){
     const i = cellOfInstance[k];
-    const y = ((i / N) | 0) % N;   // idx = (x*N + y)*N + z, so middle digit is y
+    // idx = (x*N + y)*N + z
+    const z = i % N, y = ((i / N) | 0) % N, x = (i / (N*N)) | 0;
     _col.set(colHex(state.colours[i]) || '#888888');
-    if(sel.hiLayer && y !== sel.slice) _col.multiplyScalar(0.32);
+    if(sel.hiLayer && cellToSlice(x,y,z).s !== sel.slice) _col.multiplyScalar(0.32);
     voxMesh.setColorAt(k, _col);
   }
   if(voxMesh.instanceColor) voxMesh.instanceColor.needsUpdate = true;

@@ -60,14 +60,45 @@ paid services: host it on GitHub Pages for free.
 
 | Area | What you get |
 |---|---|
-| 3D editing | Click a face (or the floor grid) to place a cube, right-click to remove; ghost preview; orbit/pan/zoom camera; auto-spin; per-layer highlighting; PNG screenshots |
-| Layer editing | Top-down slices from bottom → up, onion skin, occupancy strip, coordinates overlay |
-| Tools | Build, paint, rectangle, erase, flood fill (2D area / 3D connected region), colour picker, unit placement; mirror-X / mirror-Z symmetry |
-| Model ops | Flip X/Y/Z, rotate 90°, shift on any axis, hollow (remove enclosed interior), resize grid with centering, undo/redo (200 steps) |
+| 3D editing | Click a face (or the floor grid) to place a cube, right-click to remove; ghost preview; orbit/pan/zoom camera; auto-spin; slice highlighting; **isolate** to hide everything past the current slice so you can build *inside* a solid body; PNG screenshots |
+| Slice editing | Cut along **any axis** — top view (stack layers bottom-up), front view (the elevation a sprite is drawn in), side view — with onion skin, occupancy strip, coordinate overlay, and a **tracing image** you can load behind the grid to draw over |
+| Tools | Build, paint, rectangle, **line**, erase, flood fill (slice area / 3D connected region), colour picker, unit placement; **brush sizes 1–4**; mirror-X / mirror-Z symmetry with live preview of every mirrored footprint |
+| Slice ops | Copy / paste a slice, duplicate it onto the neighbour and follow (hand extrusion), fill or empty a slice in one click |
+| Model ops | Flip X/Y/Z, rotate 90°, shift on any axis, hollow (remove enclosed interior), **centre** on the floor, **trim** the grid down to the model, resize with centering, undo/redo (200 steps) |
+| Colours | The game's six (Y O R G B + X wildcard) with the real art hexes, each recolourable and relabellable; **add your own** past those six (see below); swap one colour for another or delete every voxel of a colour across the whole model |
 | Import | Unity `.asset` (file or pasted YAML), MagicaVoxel `.vox` (colours mapped to the game palette, near-greys → X wildcard), PNG voxelizer approximating the Unity pipeline |
 | Export | Unity `.asset` byte-identical format, robust download fallbacks, copy-as-YAML, PNG screenshot |
 | Level design | Layer rules, unit rules, the real 5-column crate board (column-major, per-crate flags, per-column refills) with auto-fill, ammo stats that include the checkered shell the game adds, validation for the traps the format hides (Auto cells inheriting an Empty refill, invalid unit kinds, units on empty cells, out-of-range colours, unit-rule mismatches, disconnected islands) |
 | Comfort | Keyboard shortcuts (press `?`), editable display palette, autosave, model library with thumbnails, shared team levels |
+
+## Adding colours past the game's six
+
+The palette's first six entries **are** the game's colours (`Cols` in
+`VoxelCore.cs`): `0` Y, `1` O, `2` R, `3` G, `4` B, `5` X — the grey wildcard any
+bullet clears. Crates only ever carry `0`–`4` (`Cols.CrateColourCount`).
+
+You can add more colours in the editor (`+ col` in the rail, or **+ colour** on
+the Model tab) and paint and export them. They are flagged red, and the Stats
+tab reports them as an error, because the **shipped game cannot use them**:
+`Palette.Of` renders anything ≥ 6 magenta, and since no crate can ever mint that
+colour, such a voxel can never be shot — the level becomes unwinnable.
+
+To make a seventh colour real, change three things in Unity and then one here:
+
+1. `Assets/VoxelVolley/Runtime/Core/VoxelCore.cs` — add the constant to `Cols`,
+   and raise `CrateColourCount` **only if** crates should carry it (that constant
+   sizes colour arrays across the runtime, the sim and the crate grid UI, which
+   is laid out in 5 columns — so raising it is a real design change, not a
+   one-liner).
+2. `Assets/VoxelVolley/Runtime/Palette.cs` — append the render colour to
+   `Palette.Colours`.
+3. Re-run the project's tests (`VoxelVolley.Tests.Editor`) and the body
+   validator (`Voxel Volley → Validate Voxel Bodies`).
+4. Here: raise `GAME_COLOURS` in [`js/palette.js`](js/palette.js). That single
+   number is what the red flags and the Stats error are gated on.
+
+Until then, treat the extras as a scratch palette — useful for blocking out a
+model before committing it to real game colours.
 
 ## Editing the format
 

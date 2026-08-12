@@ -1,15 +1,25 @@
-// Layer editor: horizontal slices viewed from above, bottom-up.
-// Columns = data x, rows = data z. Slice slider + occupancy strip included.
+// Slice editor: a 2D cut through the model, along any axis.
+//
+//   top view (y)    stacking layers bottom-up, the way a body is built
+//   front view (z)  an elevation — the view a source sprite is drawn in
+//   side view (x)   the other elevation
+//
+// One coordinate mapping in state.js serves all three (sliceToCell), so every
+// tool below is axis-agnostic.
 
-import { state, sel, EMPTY, idx, sliceIdx, on, pushUndo, popUndo, emit } from './state.js';
+import {
+  state, sel, EMPTY, sliceIdx, sliceToCell, axisInfo,
+  on, pushUndo, popUndo, emit,
+} from './state.js';
 import { colHex } from './palette.js';
-import { sliceAction, sliceRect, setSlice } from './tools.js';
+import { sliceAction, sliceRect, sliceLine, setSlice } from './tools.js';
 
 let cv, ctx, rangeEl, lblEl, occEl;
 let hoverCell = null;
 let painting = false, paintBtn = 0;
-let strokeTool = null, strokeChanged = false;  // undo bookkeeping per gesture
-let rectStart = null, rectEnd = null;   // rect tool drag state (slice coords)
+let strokeTool = null, strokeChanged = false;   // undo bookkeeping per gesture
+let dragStart = null, dragEnd = null;           // rect/line drag state
+let refImage = null;                            // tracing image, or null
 
 export function initSlice(){
   cv = document.getElementById('sliceCanvas');
@@ -37,6 +47,13 @@ export function initSlice(){
   fit(); syncRange(); draw(); drawOcc();
 }
 
+/** A PNG to trace over, shown behind the grid. Pass null to clear it. */
+export function setReferenceImage(img){
+  refImage = img;
+  draw();
+}
+export const hasReferenceImage = () => refImage !== null;
+
 function fit(){
   const r = cv.parentElement.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
@@ -50,9 +67,14 @@ function geom(){
   return { cell, ox: Math.floor((w-cell*N)/2), oy: Math.floor((h-cell*N)/2), dpr, w, h, N };
 }
 function syncRange(){
+  const info = axisInfo();
   rangeEl.max = state.N-1;
   rangeEl.value = sel.slice;
-  lblEl.textContent = 'y ' + String(sel.slice).padStart(2,'0') + '/' + (state.N-1);
+  lblEl.textContent = info.letter + ' ' + String(sel.slice).padStart(2,'0') + '/' + (state.N-1);
+  const head = document.getElementById('sliceAxisLabel');
+  if(head) head.textContent = info.title;
+  document.querySelectorAll('[data-axis]').forEach(b =>
+    b.classList.toggle('on', b.dataset.axis === sel.sliceAxis));
 }
 
 export function draw(){
@@ -63,7 +85,16 @@ export function draw(){
   ctx.fillStyle = '#101218';
   ctx.fillRect(ox-2, oy-2, cell*N+4, cell*N+4);
 
-  // onion skin: layer below/above, faint
+  // tracing image behind everything, fitted to the grid square
+  if(refImage){
+    ctx.globalAlpha = sel.refOpacity;
+    const s = Math.min(cell*N/refImage.width, cell*N/refImage.height);
+    const w = refImage.width*s, h = refImage.height*s;
+    ctx.drawImage(refImage, ox + (cell*N-w)/2, oy + (cell*N-h)/2, w, h);
+    ctx.globalAlpha = 1;
+  }
+
+  // onion skin: the slices either side, faint
   if(sel.onion){
     for(const ds of [-1,1]){
       const s = sel.slice+ds;
@@ -78,7 +109,7 @@ export function draw(){
       ctx.globalAlpha = 1;
     }
   }
-  // current layer
+  // the current slice
   for(let r=0;r<N;r++) for(let c=0;c<N;c++){
     const i = sliceIdx(c,r,sel.slice);
     const v = state.colours[i];
@@ -109,45 +140,62 @@ export function draw(){
     ctx.moveTo(ox, oy+k*cell+.5); ctx.lineTo(ox+N*cell, oy+k*cell+.5);
   }
   ctx.stroke();
-  // symmetry guides
-  if(sel.symX){
-    ctx.strokeStyle = 'rgba(255,201,60,.22)';
-    ctx.beginPath(); ctx.moveTo(ox+N*cell/2+.5, oy); ctx.lineTo(ox+N*cell/2+.5, oy+N*cell); ctx.stroke();
-  }
-  if(sel.symZ){
-    ctx.strokeStyle = 'rgba(255,201,60,.22)';
-    ctx.beginPath(); ctx.moveTo(ox, oy+N*cell/2+.5); ctx.lineTo(ox+N*cell, oy+N*cell/2+.5); ctx.stroke();
-  }
+  // symmetry guides, drawn on whichever screen axis carries x / z in this view
+  drawSymmetryGuides(ctx, ox, oy, cell, N);
   // coords
   if(sel.coords){
+    const info = axisInfo();
     ctx.fillStyle = 'rgba(139,147,163,.7)'; ctx.font = '9px ui-monospace, monospace';
     ctx.textAlign='center'; ctx.textBaseline='middle';
     for(let c=0;c<N;c++) ctx.fillText(c, ox+c*cell+cell/2, oy-8);
+    ctx.fillText(info.cols, ox+N*cell+12, oy-8);
     ctx.textAlign='right';
     for(let r=0;r<N;r++) ctx.fillText(r, ox-6, oy+r*cell+cell/2);
+    ctx.fillText(info.rows, ox-6, oy+N*cell+12);
   }
-  // rect preview
-  if(rectStart && rectEnd){
-    const [ax,bx] = rectStart.x<rectEnd.x ? [rectStart.x,rectEnd.x] : [rectEnd.x,rectStart.x];
-    const [az,bz] = rectStart.z<rectEnd.z ? [rectStart.z,rectEnd.z] : [rectEnd.z,rectStart.z];
+  // rect / line preview
+  if(dragStart && dragEnd){
     ctx.fillStyle = 'rgba(255,255,255,.15)';
-    ctx.fillRect(ox+ax*cell, oy+az*cell, (bx-ax+1)*cell, (bz-az+1)*cell);
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
-    ctx.strokeRect(ox+ax*cell+.5, oy+az*cell+.5, (bx-ax+1)*cell-1, (bz-az+1)*cell-1);
-  }
-  // hover
-  if(hoverCell){
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
-    ctx.strokeRect(ox+hoverCell.x*cell+1, oy+hoverCell.z*cell+1, cell-2, cell-2);
-    if(sel.symX){
-      ctx.strokeStyle = 'rgba(255,255,255,.35)';
-      ctx.strokeRect(ox+(N-1-hoverCell.x)*cell+1, oy+hoverCell.z*cell+1, cell-2, cell-2);
-    }
-    if(sel.symZ){
-      ctx.strokeStyle = 'rgba(255,255,255,.35)';
-      ctx.strokeRect(ox+hoverCell.x*cell+1, oy+(N-1-hoverCell.z)*cell+1, cell-2, cell-2);
+    if(strokeTool === 'rect'){
+      const [ac,bc] = dragStart.col<dragEnd.col ? [dragStart.col,dragEnd.col] : [dragEnd.col,dragStart.col];
+      const [ar,br] = dragStart.row<dragEnd.row ? [dragStart.row,dragEnd.row] : [dragEnd.row,dragStart.row];
+      ctx.fillRect(ox+ac*cell, oy+ar*cell, (bc-ac+1)*cell, (br-ar+1)*cell);
+      ctx.strokeRect(ox+ac*cell+.5, oy+ar*cell+.5, (bc-ac+1)*cell-1, (br-ar+1)*cell-1);
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(ox+dragStart.col*cell+cell/2, oy+dragStart.row*cell+cell/2);
+      ctx.lineTo(ox+dragEnd.col*cell+cell/2, oy+dragEnd.row*cell+cell/2);
+      ctx.stroke();
     }
   }
+  // hover, showing the whole brush footprint
+  if(hoverCell) drawHover(ctx, ox, oy, cell, N);
+}
+
+function drawSymmetryGuides(ctx, ox, oy, cell, N){
+  if(!sel.symX && !sel.symZ) return;
+  const info = axisInfo();
+  ctx.strokeStyle = 'rgba(255,201,60,.22)';
+  const vline = () => { ctx.beginPath(); ctx.moveTo(ox+N*cell/2+.5, oy); ctx.lineTo(ox+N*cell/2+.5, oy+N*cell); ctx.stroke(); };
+  const hline = () => { ctx.beginPath(); ctx.moveTo(ox, oy+N*cell/2+.5); ctx.lineTo(ox+N*cell, oy+N*cell/2+.5); ctx.stroke(); };
+  if(sel.symX){ if(info.cols === 'x') vline(); else if(info.rows === 'x') hline(); }
+  if(sel.symZ){ if(info.cols === 'z') vline(); else if(info.rows === 'z') hline(); }
+}
+
+function drawHover(ctx, ox, oy, cell, N){
+  const r = sel.brush - 1;
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(ox+(hoverCell.col-r)*cell+1, oy+(hoverCell.row-r)*cell+1,
+                 (2*r+1)*cell-2, (2*r+1)*cell-2);
+  // mirrored footprints, faint
+  if(!sel.symX && !sel.symZ) return;
+  const info = axisInfo();
+  ctx.strokeStyle = 'rgba(255,255,255,.32)';
+  const mirrorCol = () => ctx.strokeRect(ox+(N-1-hoverCell.col-r)*cell+1, oy+(hoverCell.row-r)*cell+1, (2*r+1)*cell-2, (2*r+1)*cell-2);
+  const mirrorRow = () => ctx.strokeRect(ox+(hoverCell.col-r)*cell+1, oy+(N-1-hoverCell.row-r)*cell+1, (2*r+1)*cell-2, (2*r+1)*cell-2);
+  if(sel.symX){ if(info.cols === 'x') mirrorCol(); else if(info.rows === 'x') mirrorRow(); }
+  if(sel.symZ){ if(info.cols === 'z') mirrorCol(); else if(info.rows === 'z') mirrorRow(); }
 }
 
 function drawOcc(){
@@ -157,15 +205,16 @@ function drawOcc(){
   let max = 1;
   const counts = [];
   for(let s=0; s<N; s++){
-    let n = 0;   // layer s = height y = s (0 = bottom)
-    for(let z=0;z<N;z++) for(let x=0;x<N;x++) if(state.colours[idx(x,s,z)]!==EMPTY) n++;
+    let n = 0;
+    for(let r=0;r<N;r++) for(let c=0;c<N;c++) if(state.colours[sliceIdx(c,r,s)]!==EMPTY) n++;
     counts.push(n); max = Math.max(max, n);
   }
+  const letter = axisInfo().letter;
   counts.forEach((n, s) => {
     const b = document.createElement('i');
     b.style.height = Math.max(2, Math.round(n/max*18)) + 'px';
     if(s === sel.slice) b.classList.add('cur');
-    b.title = 'layer ' + s + ': ' + n + ' voxels';
+    b.title = letter + ' ' + s + ': ' + n + ' voxels';
     b.addEventListener('click', () => setSlice(s));
     occEl.appendChild(b);
   });
@@ -174,15 +223,14 @@ function drawOcc(){
 function cellFromEvent(e){
   const r = cv.getBoundingClientRect();
   const { cell, ox, oy, N } = geom();
-  const x = Math.floor((e.clientX - r.left - ox)/cell);
-  const z = Math.floor((e.clientY - r.top - oy)/cell);
-  return (x>=0 && x<N && z>=0 && z<N) ? {x, z} : null;
+  const col = Math.floor((e.clientX - r.left - ox)/cell);
+  const row = Math.floor((e.clientY - r.top - oy)/cell);
+  return (col>=0 && col<N && row>=0 && row<N) ? {col, row} : null;
 }
 
-// Undo pairing: exactly one snapshot per stroke, pushed at gesture start and
-// popped at gesture END if the whole stroke turned out to be a no-op. The tool
-// is captured at pointerdown so mid-gesture tool switches (keyboard, or pick's
-// own tool bounce) can never unbalance the push/pop.
+// Undo pairing: one snapshot per stroke, pushed at gesture start and popped at
+// gesture END if the whole stroke was a no-op. The tool is captured at
+// pointerdown so a mid-gesture tool switch cannot unbalance the push/pop.
 function onDown(e){
   const c = cellFromEvent(e);
   if(!c) return;
@@ -190,27 +238,30 @@ function onDown(e){
   paintBtn = e.button;
   strokeTool = sel.tool;
   if(strokeTool === 'pick'){
-    sliceAction(c.x, c.z, false);   // mutates nothing — no undo entry at all
+    sliceAction(c.col, c.row, false);   // mutates nothing
     return;
   }
   painting = true;
   strokeChanged = false;
-  if(strokeTool === 'rect'){ rectStart = c; rectEnd = c; draw(); return; }
+  if(strokeTool === 'rect' || strokeTool === 'line'){
+    dragStart = c; dragEnd = c; draw();
+    return;
+  }
   pushUndo();
-  strokeChanged = sliceAction(c.x, c.z, paintBtn===2);
+  strokeChanged = sliceAction(c.col, c.row, paintBtn===2);
   emit('grid');
 }
 function onMove(e){
   const c = cellFromEvent(e);
   hoverCell = c;
   if(painting && c){
-    if(strokeTool === 'rect'){ rectEnd = c; draw(); return; }
+    if(strokeTool === 'rect' || strokeTool === 'line'){ dragEnd = c; draw(); return; }
     if(strokeTool==='paint' || strokeTool==='build' || strokeTool==='erase'){
-      if(sliceAction(c.x, c.z, paintBtn===2)){
+      if(sliceAction(c.col, c.row, paintBtn===2)){
         strokeChanged = true;
         emit('grid');
       }
-      return; // 'grid' listener redraws
+      return; // the 'grid' listener redraws
     }
   }
   draw();
@@ -218,15 +269,18 @@ function onMove(e){
 function onUp(){
   if(!painting){ strokeTool = null; return; }
   painting = false;
-  if(strokeTool === 'rect'){
-    if(rectStart && rectEnd){
+  if(strokeTool === 'rect' || strokeTool === 'line'){
+    if(dragStart && dragEnd){
       pushUndo();
-      if(!sliceRect(rectStart.x, rectStart.z, rectEnd.x, rectEnd.z, paintBtn===2)) popUndo();
+      const changed = strokeTool === 'rect'
+        ? sliceRect(dragStart.col, dragStart.row, dragEnd.col, dragEnd.row, paintBtn===2)
+        : sliceLine(dragStart.col, dragStart.row, dragEnd.col, dragEnd.row, paintBtn===2);
+      if(!changed) popUndo();
       emit('grid');
     }
-    rectStart = rectEnd = null;
+    dragStart = dragEnd = null;
   } else if(!strokeChanged){
-    popUndo();   // entire stroke was a no-op
+    popUndo();   // the entire stroke was a no-op
   }
   strokeTool = null;
   strokeChanged = false;

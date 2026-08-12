@@ -88,17 +88,70 @@ console.log('vox import');
   const p = parseVox(file.buffer);
   check('parses fixture', p.size.x===2 && p.size.y===1 && p.size.z===3 && p.voxels.length===3);
   const g = voxToGrid(p);
-  check('grid size clamps to MIN_N', g.N === 4);
+  check('grid size clamps to MIN_N', g.N === 3, 'N=' + g.N);
   check('all voxels placed', g.voxels === 3);
-  // red should map to c0 (#ff5252), blue to c1 (#4f8df9) with the default palette
+  // pure red maps to game R (index 2), pure blue to game B (index 4)
   const solid = [...g.colours].filter(v => v !== 255);
-  check('colours mapped to game palette', solid.includes(0) && solid.includes(1));
+  check('colours mapped to game palette (R=2, B=4)', solid.includes(2) && solid.includes(4), JSON.stringify(solid));
+
+  // vox z-up must land on our y-up: the vz=2 voxel sits at data y=2 (two above the floor)
+  const { idx: gIdx } = await import(join(root, 'js/state.js'));
+  check('.vox height maps to y-up', g.colours[(0*3 + 2)*3 + 1] !== 255);
 
   // regression: large flat model (80×80×1) must not lose its height dimension when downscaled
   const flatVox = [];
   for(let x=0;x<80;x+=8) for(let y=0;y<80;y+=8) flatVox.push([x,y,0,1]);
   const gf = voxToGrid({ size:{x:80,y:80,z:1}, voxels: flatVox, palette: p.palette });
   check('flat .vox model imports after downscale', gf.voxels > 0, gf.voxels + ' placed');
+}
+
+/* ---------- 3b. axis convention locked to Unity's VoxelCore ---------- */
+console.log('unity axis convention');
+{
+  const stateMod = await import(join(root, 'js/state.js'));
+  stateMod.state.N = 14;
+  const { idx, sliceIdx } = stateMod;
+  // VoxelCore.CellIdx(i,j,k,n) = (i*n + j)*n + k
+  check('idx matches CellIdx order', idx(1,8,3) === (1*14+8)*14+3 && idx(0,0,1) === 1 && idx(1,0,0) === 196);
+  check('sliceIdx: layer = y, col = x, row = z', sliceIdx(1,3,8) === idx(1,8,3));
+
+  // orientation lock, measured from the real bird asset (verified against the
+  // Unity renderer): voxels per height layer, bottom = 26 … top = 46
+  const bird = parseAsset(original);
+  const perY = [];
+  for(let y=0;y<14;y++){
+    let n = 0;
+    for(let x=0;x<14;x++) for(let z=0;z<14;z++) if(bird.colours[(x*14+y)*14+z] !== 255) n++;
+    perY.push(n);
+  }
+  check('bird bottom layer has 26 voxels', perY[0] === 26, String(perY[0]));
+  check('bird top layer has 46 voxels', perY[13] === 46, String(perY[13]));
+  check('bird first solid cell is (1,8,3) = R', bird.colours[311] === 2);
+}
+
+/* ---------- 3c. every asset in the Unity project round-trips ---------- */
+{
+  const projDir = '/Users/muhammadahmad/Unity-projects/Voxel_Volley/Assets/VoxelVolley/VoxelBodies';
+  let files = [];
+  try{
+    const walk = d => { for(const e of readdirSync(d, {withFileTypes:true})){
+      if(e.isDirectory()) walk(join(d, e.name));
+      else if(e.name.endsWith('.asset')) files.push(join(d, e.name));
+    }};
+    walk(projDir);
+  }catch{ files = null; }
+  if(files){
+    console.log('unity project assets');
+    let ok = 0;
+    const bad = [];
+    for(const f of files){
+      const orig = readFileSync(f, 'utf8');
+      try{ if(exportAsset(parseAsset(orig)) === orig) ok++; else bad.push(f); }
+      catch(e){ bad.push(f + ' (' + e.message + ')'); }
+    }
+    check(`all ${files.length} project assets round-trip byte-identical`, ok === files.length,
+      bad.slice(0,3).map(b => b.split('/').pop()).join(', '));
+  }
 }
 
 /* ---------- 4. every DOM id referenced in JS exists in index.html ---------- */

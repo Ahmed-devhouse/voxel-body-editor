@@ -6,14 +6,14 @@ import {
   voxelCount, serialize, deserialize,
 } from './state.js';
 import { parseAsset, exportAsset } from './asset.js';
-import { PALETTE, colHex, setPaletteColour, resetPalette } from './palette.js';
+import { PALETTE, COLOUR_LABELS, COLOUR_NAMES, COLOUR_COUNT, setPaletteColour, resetPalette } from './palette.js';
 import { setTool, setColour, setSlice, flip, shiftGrid, rotateY, hollow, clearAll } from './tools.js';
 import { initSlice } from './slice.js';
 import { initEditor3D, screenshot, setSpin, resetView } from './editor3d.js';
 import { maskFromImage, voxelize } from './voxelize.js';
 import { parseVox, voxToGrid } from './vox.js';
 import * as lib from './library.js';
-import { initCrates, renderCrates } from './crates.js';
+import { initCrates, renderCrates, remapRows } from './crates.js';
 import { initStats, updateStats } from './stats.js';
 import {
   toast, openModal, closeModal, initModals, initTabs,
@@ -181,8 +181,8 @@ function wireToolRail(){
     const b = document.createElement('button');
     b.className = 'swatch';
     b.style.background = hex;
-    b.title = 'Colour ' + i + ' (key ' + (i+1) + ')';
-    b.innerHTML = '<b>' + i + '</b>';
+    b.title = COLOUR_LABELS[i] + ' — ' + COLOUR_NAMES[i] + ' (key ' + (i+1) + ')';
+    b.innerHTML = '<b>' + COLOUR_LABELS[i] + '</b>';
     b.addEventListener('click', () => setColour(i));
     pal.appendChild(b);
   });
@@ -260,10 +260,16 @@ function wireModelTab(){
   set('fAlpha', t => state.meta.alphaThreshold = parseFloat(t.value) || 0);
   set('fGrey', t => state.meta.greyToWildcard = t.checked ? 1 : 0);
   set('fShell', t => state.meta.wrapInShell = t.checked ? 1 : 0);
-  set('fMisplay', t => state.meta.misplayTolerance = Math.max(0, parseInt(t.value) || 0));
+  set('fMisplay', t => state.meta.misplayTolerance =
+    Math.min(0.5, Math.max(0, parseFloat(t.value) || 0)));   // float share of taps, [Range(0, 0.5)]
   set('fGuid', t => state.meta.scriptGuid = t.value.trim() || defaultMeta().scriptGuid, 'input');
-  set('fCustomGrid', t => state.meta.customCrateGrid = t.checked ? 1 : 0);
-  set('fCrateRows', t => state.meta.crateRows = Math.max(1, parseInt(t.value) || 1));
+  set('fCustomGrid', t => { state.meta.customCrateGrid = t.checked ? 1 : 0; renderCrates(); });
+  set('fCrateRows', t => {
+    const next = Math.min(64, Math.max(1, parseInt(t.value) || 1));  // CratePlan.MaxRows = 64
+    remapRows(state.meta.crateRows, next);   // keep columns intact when the stride changes
+    state.meta.crateRows = next;
+    renderCrates();
+  });
   $('btnResize').addEventListener('click', () => {
     if(resizeGrid(parseInt($('fSize').value) || state.N))
       toast('Resized to ' + state.N + '³ (content centered)');
@@ -272,7 +278,7 @@ function wireModelTab(){
 
   // display palette editor
   const pe = $('palEdit');
-  for(let i=0; i<5; i++){
+  for(let i=0; i<COLOUR_COUNT; i++){
     const wrap = document.createElement('div');
     wrap.className = 'pe';
     const inp = document.createElement('input');
@@ -280,7 +286,7 @@ function wireModelTab(){
     inp.value = PALETTE[i];
     inp.addEventListener('input', () => setPaletteColour(i, inp.value));
     wrap.appendChild(inp);
-    wrap.appendChild(Object.assign(document.createElement('span'), { textContent: 'c' + i }));
+    wrap.appendChild(Object.assign(document.createElement('span'), { textContent: COLOUR_LABELS[i] }));
     pe.appendChild(wrap);
   }
   $('palReset').addEventListener('click', () => {
@@ -295,8 +301,9 @@ function wireModelTab(){
    Inspector: rules tab
 ===================================================================== */
 function colourOptions(v){
+  // layer rules may use any voxel colour, X wildcard included (Range(0,5) in Unity)
   let h = '';
-  for(let i=0;i<5;i++) h += `<option value="${i}" ${v===i?'selected':''}>c${i}</option>`;
+  for(let i=0;i<COLOUR_COUNT;i++) h += `<option value="${i}" ${v===i?'selected':''}>${COLOUR_LABELS[i]}</option>`;
   return h;
 }
 function renderRules(){
@@ -320,7 +327,7 @@ function renderRules(){
   state.meta.unitRules.forEach((r, i) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td><input type="number" value="${r.layer}" min="0" data-k="layer"></td>
-      <td><input type="number" value="${r.kind}" min="1" data-k="kind"></td>
+      <td><select data-k="kind"><option value="1" ${r.kind===1?'selected':''}>armoured</option><option value="4" ${r.kind===4?'selected':''}>hidden</option>${r.kind!==1&&r.kind!==4?`<option value="${r.kind}" selected>kind ${r.kind}?</option>`:''}</select></td>
       <td><input type="number" value="${r.count}" min="0" data-k="count"></td>
       <td><button class="del" title="Remove">×</button></td>`;
     tr.querySelectorAll('[data-k]').forEach(el =>
@@ -510,7 +517,7 @@ function wireKeyboard(){
     else if(k === 'x'){ sel.symX = !sel.symX; emit('sel'); }
     else if(k === 'z'){ sel.symZ = !sel.symZ; emit('sel'); }
     else if(k === '?') openModal('helpModal');
-    else if(k >= '1' && k <= '5') setColour(parseInt(k) - 1);
+    else if(k >= '1' && k <= '6') setColour(parseInt(k) - 1);
   });
 }
 

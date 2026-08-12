@@ -52,7 +52,7 @@ export function sliceAction(cx, cy, right){
 
   if(sel.tool === 'pick'){
     const v = state.colours[sliceIdx(cx, cy, s)];
-    if(v !== EMPTY && v < 5) setColour(v);
+    if(v !== EMPTY && v < 6) setColour(v);
     return false;
   }
   for(const [tx, tz] of targets){
@@ -114,7 +114,7 @@ export function hit3DAction(hit, right){
   if(sel.tool === 'pick'){
     if(!hit.floor){
       const v = state.colours[ci];
-      if(v !== EMPTY && v < 5) setColour(v);
+      if(v !== EMPTY && v < 6) setColour(v);
     }
     return null;
   }

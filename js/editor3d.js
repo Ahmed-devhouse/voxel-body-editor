@@ -20,8 +20,10 @@ let hoverTarget = null;          // [x,y,z] ghost cell (build tool)
 let hoverCell = null;            // [x,y,z] outlined cell (other tools)
 let down = null;                 // {x, y, button}
 
+// data axes match world axes directly: x = world X, y = world Y (up, 0 = bottom
+// layer resting on the ground plane), z = world Z (depth)
 const center = () => (state.N-1)/2;
-const worldFromData = (x,y,z) => new THREE.Vector3(x-center(), (state.N-1-y)+0.5, z-center());
+const worldFromData = (x,y,z) => new THREE.Vector3(x-center(), y+0.5, z-center());
 
 export function initEditor3D(){
   container = document.getElementById('viewPane');
@@ -172,7 +174,7 @@ function rebuild(){
   for(let z=0; z<N; z++) for(let y=0; y<N; y++) for(let x=0; x<N; x++){
     const i = idx(x,y,z);
     if(c[i] === EMPTY) continue;
-    _m.makeTranslation(x-center(), (N-1-y)+0.5, z-center());
+    _m.makeTranslation(x-center(), y+0.5, z-center());
     voxMesh.setMatrixAt(count, _m);
     cellOfInstance[count] = i;
     count++;
@@ -190,9 +192,9 @@ function applyColours(count){
   const N = state.N;
   for(let k=0; k<count; k++){
     const i = cellOfInstance[k];
-    const y = ((i / N) | 0) % N;
+    const y = ((i / N) | 0) % N;   // idx = (x*N + y)*N + z, so middle digit is y
     _col.set(colHex(state.colours[i]) || '#888888');
-    if(sel.hiLayer && (N-1-y) !== sel.slice) _col.multiplyScalar(0.32);
+    if(sel.hiLayer && y !== sel.slice) _col.multiplyScalar(0.32);
     voxMesh.setColorAt(k, _col);
   }
   if(voxMesh.instanceColor) voxMesh.instanceColor.needsUpdate = true;
@@ -258,18 +260,19 @@ function pick(e){
   const N = state.N;
   if(h.object === voxMesh){
     const i = cellOfInstance[h.instanceId];
-    const x = i % N, y = ((i/N)|0) % N, z = (i/(N*N))|0;
-    // face normal is axis-aligned in world space (instances are unrotated).
-    // world +y corresponds to data -y (data y grows downward).
+    // idx = (x*N + y)*N + z
+    const z = i % N, y = ((i/N)|0) % N, x = (i/(N*N))|0;
+    // face normal is axis-aligned in world space (instances are unrotated) and
+    // data axes equal world axes, so the neighbour is a straight offset
     const n = h.face.normal;
-    const nb = [x + Math.round(n.x), y - Math.round(n.y), z + Math.round(n.z)];
+    const nb = [x + Math.round(n.x), y + Math.round(n.y), z + Math.round(n.z)];
     return { cell:[x,y,z], nb, floor:false };
   }
-  // floor: place on the bottom layer (data y = N-1)
+  // floor: place on the bottom layer (y = 0)
   const gx = Math.floor(h.point.x + N/2);
   const gz = Math.floor(h.point.z + N/2);
   if(gx<0 || gz<0 || gx>=N || gz>=N) return null;
-  const cell = [gx, N-1, gz];
+  const cell = [gx, 0, gz];
   return { cell, nb: cell, floor:true };
 }
 
@@ -317,7 +320,7 @@ function onUp(e){
   const h = pick(e);
   if(!h) return;
   const touched = hit3DAction(h, button === 2);
-  if(touched) setSlice(state.N - 1 - touched[1]);  // sync layer editor to build height
+  if(touched) setSlice(touched[1]);  // sync layer editor to build height (y = layer)
   setHover(null, null);
 }
 

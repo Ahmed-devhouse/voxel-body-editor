@@ -1,10 +1,70 @@
-// Ammo-balance stats + level validation warnings.
+// Ammo-balance stats + level validation.
+//
+// Everything here mirrors semantics read out of the Unity project rather than
+// guessed at (VoxelCore.cs, VoxelBody.cs, Core/CratePlan.cs):
+//
+//  * Clearing a level destroys EVERY voxel (BalanceSim: Cleared ⇔ remaining==0),
+//    and when wrapInShell is set the game wraps the body in a checkered shell of
+//    Y/O voxels on an (size+4)³ grid — for a 14³ body that is 1736 extra voxels,
+//    more than the body itself, so ignoring it makes ammo maths meaningless.
+//  * A colour is reachable FOREVER if any column's refill is not Empty and is
+//    either demand-weighted or pinned to that colour (CratePlan.CanSupply).
+//    Opening cells are a finite bonus on top.
+//  * An opening cell inherits from its column's refill whatever it leaves unset
+//    (CratePlan.CellAt): colour when not pinned, rounds when <= 0, and FLAGS when
+//    Auto — so an Auto cell in a column whose refill is Empty silently becomes a
+//    hole. That trap is worth shouting about.
+//  * X (5) voxels are destroyed by a bullet of any colour (VoxelCore.Matches).
+//  * Baked unit kinds are 1 Armoured and 4 Hidden only; 2/3 are boosters.
+//
+// The final completability verdict belongs to the Unity generator's probe
+// (BalanceSim), which simulates play. This panel reports the numbers and the
+// unambiguous structural faults, and says so rather than overclaiming.
 
-import { state, EMPTY, idx, colourCounts, unitCount, on } from './state.js';
-import { PALETTE } from './palette.js';
+import { state, EMPTY, idx, unitCount, on } from './state.js';
+import { PALETTE, COLOUR_LABELS, CRATE_COLOURS } from './palette.js';
 
 const $ = id => document.getElementById(id);
+const FLAG_AUTO = 0, FLAG_EMPTY = 1 << 3;
+const CRATE_COLUMNS = 5;
+const SHELL_PAD = 2;          // VoxelCore.ShellPad = 1 + ShellGap
 
+/* ---------- voxel censuses ---------- */
+function bodyCounts(){
+  const c = [0,0,0,0,0,0]; let other = 0;
+  for(let i=0;i<state.colours.length;i++){
+    const v = state.colours[i];
+    if(v === EMPTY) continue;
+    if(v < 6) c[v]++; else other++;
+  }
+  c.other = other;
+  return c;
+}
+// The shell the game adds around the body: the boundary layer of an
+// (size + 2*ShellPad)³ grid, coloured Y when (i+j+k) is odd, else O.
+function shellCounts(){
+  const n = state.N + 2*SHELL_PAD;
+  let y = 0, o = 0;
+  for(let i=0;i<n;i++) for(let j=0;j<n;j++) for(let k=0;k<n;k++){
+    if(i===0||j===0||k===0||i===n-1||j===n-1||k===n-1)
+      ((i+j+k) & 1) ? y++ : o++;
+  }
+  return { y, o, total: y+o, n };
+}
+function badUnitKinds(){
+  const bad = new Set();
+  for(let i=0;i<state.units.length;i++){
+    const k = state.units[i];
+    if(k !== 0 && k !== 1 && k !== 4) bad.add(k);
+  }
+  return [...bad];
+}
+function unitsOnEmpty(){
+  let n = 0;
+  for(let i=0;i<state.units.length;i++)
+    if(state.units[i] > 0 && state.colours[i] === EMPTY) n++;
+  return n;
+}
 function islandCount(){
   const N = state.N, c = state.colours;
   const seen = new Uint8Array(N*N*N);
@@ -16,7 +76,7 @@ function islandCount(){
     seen[start] = 1;
     while(q.length){
       const i = q.pop();
-      const x = i % N, y = ((i/N)|0) % N, z = (i/(N*N))|0;
+      const z = i % N, y = ((i/N)|0) % N, x = (i/(N*N))|0;   // idx = (x*N+y)*N+z
       for(const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]){
         const nx=x+dx, ny=y+dy, nz=z+dz;
         if(nx<0||ny<0||nz<0||nx>=N||ny>=N||nz>=N) continue;
@@ -28,64 +88,154 @@ function islandCount(){
   return islands;
 }
 
+/* ---------- crate plan, resolved the way the game resolves it ---------- */
+function refillOf(c){
+  const r = state.meta.crateRefills[c];
+  if(!r) return {colour:-1, rounds:0, chain:0, flags:FLAG_AUTO};
+  // CratePlan.RefillOf normalises a junk colour to "any"
+  return {...r, colour: (r.colour >= 0 && r.colour < CRATE_COLOURS) ? r.colour : -1};
+}
+// mirror of CratePlan.CellAt: unset fields inherit from the column's refill
+function cellAt(c, r){
+  const rows = Math.max(1, state.meta.crateRows|0);
+  const refill = refillOf(c);
+  const stored = state.meta.crateCells[c*rows + r];
+  if(!stored) return {...refill};
+  const cell = {...stored};
+  const pinned = cell.colour >= 0 && cell.colour < CRATE_COLOURS;
+  if(!pinned) cell.colour = refill.colour;
+  if(cell.rounds <= 0) cell.rounds = refill.rounds;
+  if(cell.flags === FLAG_AUTO) cell.flags = refill.flags;   // ← the silent-hole path
+  return cell;
+}
+
 export function updateStats(){
   const tbl = $('statsTbl');
   if(!tbl) return;
-  const counts = colourCounts();
-  const ammo = [0,0,0,0,0], crateN = [0,0,0,0,0];
-  let anyAmmo = 0;
-  for(const cell of state.meta.crateCells){
-    if(cell.colour>=0 && cell.colour<5){ ammo[cell.colour]+=cell.rounds; crateN[cell.colour]++; }
-    else anyAmmo += cell.rounds;
+
+  const body = bodyCounts();
+  const shelled = !!state.meta.wrapInShell;
+  const shell = shelled ? shellCounts() : {y:0, o:0, total:0, n:state.N};
+  const custom = !!state.meta.customCrateGrid;
+  const rows = Math.max(1, state.meta.crateRows|0);
+
+  // targets the player must destroy, per colour
+  const need = [0,0,0,0,0];
+  for(let i=0;i<CRATE_COLOURS;i++) need[i] = body[i];
+  need[0] += shell.y;   // Y
+  need[1] += shell.o;   // O
+  const wild = body[5];
+
+  // supply — only meaningful when the body authors its own board
+  const opening = [0,0,0,0,0];
+  let anyOpening = 0;
+  const unlimited = [false,false,false,false,false];
+  let autoHoles = 0, holes = 0;
+  if(custom){
+    for(let c=0;c<CRATE_COLUMNS;c++){
+      const refill = refillOf(c);
+      if(!(refill.flags & FLAG_EMPTY)){
+        if(refill.colour < 0) for(let i=0;i<CRATE_COLOURS;i++) unlimited[i] = true;
+        else unlimited[refill.colour] = true;
+      }
+      for(let r=0;r<rows;r++){
+        const stored = state.meta.crateCells[c*rows + r];
+        const cell = cellAt(c, r);
+        if(cell.flags & FLAG_EMPTY){
+          holes++;
+          if(stored && stored.flags === FLAG_AUTO) autoHoles++;   // inherited the hole
+          continue;
+        }
+        if(cell.colour >= 0 && cell.colour < CRATE_COLOURS) opening[cell.colour] += cell.rounds;
+        else anyOpening += cell.rounds;
+      }
+    }
   }
-  let html = '<tr><th>colour</th><th>voxels</th><th>crates</th><th>ammo</th><th>ratio</th></tr>';
-  let tv=0, ta=0;
-  for(let i=0;i<5;i++){
-    tv+=counts[i]; ta+=ammo[i];
-    const ratio = counts[i] ? ammo[i]/counts[i] : 0;
-    const cls = counts[i]===0 ? '' : ratio>=1 ? 'okA' : 'badA';
-    html += `<tr><td><span class="cswatch" style="background:${PALETTE[i]}"></span>c${i}</td>
-      <td>${counts[i]}</td><td>${crateN[i]}</td><td>${ammo[i]}</td>
-      <td class="${cls}">${counts[i] ? ratio.toFixed(2)+'×' : '—'}</td></tr>`;
+
+  /* ---------- table ---------- */
+  let html = '<tr><th>colour</th><th>voxels</th>' +
+    (shelled ? '<th>+shell</th>' : '') +
+    (custom ? '<th>opening</th><th>refill</th>' : '') + '</tr>';
+  let totalOpening = 0;
+  for(let i=0;i<CRATE_COLOURS;i++){
+    totalOpening += opening[i];
+    const short = custom && !unlimited[i] && need[i] > opening[i] + anyOpening;
+    html += `<tr><td><span class="cswatch" style="background:${PALETTE[i]}"></span>${COLOUR_LABELS[i]}</td>
+      <td>${body[i]}</td>` +
+      (shelled ? `<td>${i===0 ? shell.y : i===1 ? shell.o : 0}</td>` : '') +
+      (custom ? `<td class="${short?'badA':''}">${opening[i]}</td>
+        <td class="${unlimited[i]?'okA':''}">${unlimited[i] ? '∞' : '—'}</td>` : '') +
+      '</tr>';
   }
-  html += `<tr><td><b>total</b></td><td><b>${tv}</b></td><td>${state.meta.crateCells.length}</td><td><b>${ta}</b></td>
-    <td>${tv ? (ta/tv).toFixed(2)+'×' : '—'}</td></tr>`;
+  if(wild > 0)
+    html += `<tr><td><span class="cswatch" style="background:${PALETTE[5]}"></span>X</td>
+      <td>${wild}</td>${shelled?'<td>0</td>':''}${custom?'<td colspan="2" style="text-align:left;color:var(--mut)">any bullet</td>':''}</tr>`;
+  const bodyTotal = body[0]+body[1]+body[2]+body[3]+body[4]+wild;
+  html += `<tr><td><b>total</b></td><td><b>${bodyTotal}</b></td>` +
+    (shelled ? `<td><b>${shell.total}</b></td>` : '') +
+    (custom ? `<td><b>${totalOpening + anyOpening}</b></td><td></td>` : '') + '</tr>';
   tbl.innerHTML = html;
 
   /* ---------- validation ---------- */
-  const warnings = [], infos = [];
+  const warn = [], info = [];
   const painted = unitCount();
   const ruled = state.meta.unitRules.reduce((s,r) => s+r.count, 0);
 
-  if(tv === 0) warnings.push('Model is empty — nothing to export.');
-  if(counts.other) warnings.push(counts.other + ' voxel(s) use colour values outside 0–4 (wildcard?). The game must know how to handle these.');
-  for(let i=0;i<5;i++){
-    if(counts[i] > 0 && ammo[i] + anyAmmo < counts[i])
-      warnings.push(`Colour c${i}: only ${ammo[i]+anyAmmo} rounds for ${counts[i]} voxels — level may be uncompletable.`);
-    if(counts[i] === 0 && crateN[i] > 0)
-      infos.push(`Crates supply colour c${i} but the model has no c${i} voxels.`);
+  if(bodyTotal === 0) warn.push('Model is empty — nothing to export.');
+  if(state.N < 3 || state.N > 24)
+    warn.push(`Size ${state.N} is outside VoxelBody's supported range (3–24) and will be clamped in Unity.`);
+  if(body.other)
+    warn.push(`${body.other} voxel(s) use colour values outside 0–5 — the game renders those magenta.`);
+  const badKinds = badUnitKinds();
+  if(badKinds.length)
+    warn.push(`Unit kind ${badKinds.join(', ')} found — baked bodies only accept 1 (armoured) and 4 (hidden); 2 bomb / 3 rocket are boosters, never voxels.`);
+  const orphans = unitsOnEmpty();
+  if(orphans) warn.push(`${orphans} unit(s) sit on empty cells and will never appear in play.`);
+
+  if(shelled)
+    info.push(`Shell on: the game wraps this body in an ${shell.n}³ grid, adding <b>${shell.total}</b> checkered voxels (${shell.y} Y + ${shell.o} O) that must also be shot — included in the counts above.`);
+
+  if(!custom){
+    info.push('Custom crate grid is off — the game rolls its stock demand-weighted board, which always mints colours something still standing needs, so ammo cannot run dry.');
+  } else {
+    if(autoHoles)
+      warn.push(`${autoHoles} opening crate(s) are on Auto in a column whose refill carries the Empty flag — <b>the game makes them inherit Empty, turning them into holes</b>. Set their flags explicitly (Plain) or clear Empty on that column's refill.`);
+    else if(holes)
+      info.push(`${holes} authored hole(s) on the opening board.`);
+    const refilling = unlimited.filter(Boolean).length;
+    if(refilling === 0){
+      info.push('No column refills — the opening board is this level\'s entire ammo supply.');
+      const shortList = [];
+      for(let i=0;i<CRATE_COLOURS;i++)
+        if(need[i] > opening[i] + anyOpening)
+          shortList.push(`${COLOUR_LABELS[i]} ${opening[i] + anyOpening}/${need[i]}`);
+      if(shortList.length)
+        warn.push(`Opening rounds don't cover every voxel of: ${shortList.join(', ')} (rounds/voxels, shell included). Confirm with the Unity generator's balance probe before shipping — it simulates play, this panel only counts.`);
+    } else {
+      info.push(`${refilling} colour(s) refill forever and can always be reached; opening rounds are a finite bonus on top.`);
+    }
   }
+
   if(painted !== ruled)
-    warnings.push(`Painted units (${painted}) don't match unit rules total (${ruled}).`);
+    warn.push(`Painted units (${painted}) don't match unit rules total (${ruled}). The game builds from the painted grid — rules only describe generator intent.`);
   else if(ruled > 0)
-    infos.push(`Painted units: ${painted} — matches unit rules.`);
-  const isl = tv > 0 ? islandCount() : 0;
-  if(isl > 1) infos.push(`Model has ${isl} disconnected islands (fine if intended).`);
-  if(anyAmmo) infos.push(`Wildcard crates supply ${anyAmmo} extra rounds (counted for every colour above).`);
-  if(state.meta.crateCells.length === 0 && tv > 0)
-    warnings.push('No crate cells defined — use auto-fill in the Crates tab as a starting point.');
+    info.push(`Painted units: ${painted} — matches unit rules.`);
+  const isl = bodyTotal > 0 ? islandCount() : 0;
+  if(isl > 1) info.push(`Body has ${isl} disconnected islands (fine if intended).`);
+  if(anyOpening) info.push(`Demand-weighted opening crates supply ${anyOpening} rounds usable by any colour.`);
 
   const list = $('validList');
   list.innerHTML =
-    warnings.map(w => `<li class="vwarn">${w}</li>`).join('') +
-    infos.map(t => `<li class="vinfo">${t}</li>`).join('') ||
+    warn.map(w => `<li class="vwarn">${w}</li>`).join('') +
+    info.map(t => `<li class="vinfo">${t}</li>`).join('') ||
     '<li class="vok">No issues found.</li>';
-  const note = $('statsNote');
-  note.textContent = 'Ratio = crate ammo ÷ voxels of that colour. Under 1.00× means the player cannot clear that colour without refills.';
+  $('statsNote').innerHTML = custom
+    ? 'Voxels are what must be destroyed to clear the level; “opening” = rounds on the starting board after each cell inherits its column\'s refill, as the game does. A colour marked ∞ can always be reached.'
+    : 'Voxels are what must be destroyed to clear the level. Turn on the custom crate grid in the Crates tab to author and check an ammo supply.';
 }
 
 export function initStats(){
-  // debounced: 'grid' fires per paint stroke and the island scan is O(N³)
+  // debounced: 'grid' fires per paint stroke and the island/shell scans are O(N³)
   let timer = null;
   const soon = () => { clearTimeout(timer); timer = setTimeout(updateStats, 150); };
   on('grid', soon);

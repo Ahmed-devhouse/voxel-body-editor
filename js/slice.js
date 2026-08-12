@@ -157,9 +157,8 @@ function drawOcc(){
   let max = 1;
   const counts = [];
   for(let s=0; s<N; s++){
-    const y = N-1-s;
-    let n = 0;
-    for(let z=0;z<N;z++) for(let x=0;x<N;x++) if(state.colours[idx(x,y,z)]!==EMPTY) n++;
+    let n = 0;   // layer s = height y = s (0 = bottom)
+    for(let z=0;z<N;z++) for(let x=0;x<N;x++) if(state.colours[idx(x,s,z)]!==EMPTY) n++;
     counts.push(n); max = Math.max(max, n);
   }
   counts.forEach((n, s) => {

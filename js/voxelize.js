@@ -77,7 +77,10 @@ export function voxelize(mask, opts){
   const layerRules = opts.layerRules || [];
   const unitRules = opts.placeUnits ? (opts.unitRules || []) : [];
 
-  const idx = (x,y,z) => x + y*N + z*N*N;
+  // Unity CellIdx order; image stands upright: image column → x, image row →
+  // y flipped (row 0 is the top of the picture, y = 0 is the bottom layer),
+  // depth extruded along z — same mapping as the Unity VoxelBodyGen baker.
+  const idx = (x,y,z) => (x*N + y)*N + z;
   const colours = new Uint8Array(N*N*N).fill(EMPTY);
   const units = new Uint8Array(N*N*N);
   const d2 = distanceField(mask, N);
@@ -89,10 +92,10 @@ export function voxelize(mask, opts){
     if(dz > halfD) continue;
     const t = halfD > 0.01 ? dz/halfD : 0;
     const inset = rounding * (1 - Math.sqrt(Math.max(0, 1-t*t))) * halfD;
-    for(let y=0;y<N;y++) for(let x=0;x<N;x++){
-      if(!mask[x+y*N]) continue;
-      if(d2[x+y*N] - 0.5 < inset) continue;
-      colours[idx(x,y,z)] = 0;   // placeholder, coloured below
+    for(let py=0;py<N;py++) for(let px=0;px<N;px++){
+      if(!mask[px+py*N]) continue;
+      if(d2[px+py*N] - 0.5 < inset) continue;
+      colours[idx(px, N-1-py, z)] = 0;   // placeholder, coloured below
     }
   }
 

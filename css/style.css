@@ -122,14 +122,25 @@ table.rules input,table.rules select{width:100%;padding:2px 4px;font-size:11px}
 table.rules .del{padding:1px 6px;color:var(--bad);border-color:transparent;background:transparent}
 table.rules .del:hover{border-color:var(--bad)}
 .cswatch{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:5px}
-.crateGrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.crateCell{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px;position:relative}
-.crateCell .idx{position:absolute;top:4px;right:6px;font:9px var(--mono);color:var(--dim)}
-.crateCell .row{display:flex;align-items:center;gap:4px;margin-top:4px}
-.crateCell .row:first-of-type{margin-top:0}
-.crateCell label{font:9px var(--mono);letter-spacing:.06em;text-transform:uppercase;width:44px;flex:none}
-.crateCell input,.crateCell select{width:100%;padding:1px 5px;font:11px var(--mono)}
-.crateCell .kill{position:absolute;bottom:4px;right:6px;background:none;border:none;color:var(--dim);padding:0;font-size:11px}
+/* five columns need a floor width or the round/chain digits get clipped;
+   the board scrolls sideways inside its own container instead */
+.crateCols{display:grid;grid-template-columns:repeat(5,minmax(78px,1fr));gap:5px;overflow-x:auto;padding-bottom:4px}
+.crateCol{display:flex;flex-direction:column;gap:5px;min-width:0}
+.crateCol .colHead{font:9px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim);text-align:center}
+.crateCell{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 4px;position:relative}
+.crateCell .idx{position:absolute;top:3px;right:5px;font:8px var(--mono);color:var(--dim)}
+.crateCell .row{display:flex;align-items:center;gap:3px;margin-top:3px}
+.crateCell .row:first-of-type{margin-top:8px}
+.crateCell label{font:8px var(--mono);letter-spacing:.04em;text-transform:uppercase;flex:none;width:22px}
+.crateCell input,.crateCell select{width:100%;min-width:0;padding:1px 3px;font:10px var(--mono)}
+/* spinner arrows would consume the whole field at this width */
+.crateCell input[type=number]{-webkit-appearance:none;appearance:none;margin:0}
+.crateCell input[type=number]::-webkit-outer-spin-button,
+.crateCell input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.crateCell .flagRow{display:flex;gap:2px;margin-top:4px}
+.crateCell .fbit{flex:1;padding:1px 0;font:9px var(--mono);border-radius:4px;color:var(--dim);background:transparent;border:1px solid var(--line)}
+.crateCell .fbit.on{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+.crateCell .kill{width:100%;margin-top:4px;background:none;border:none;color:var(--dim);padding:0;font-size:10px}
 .crateCell .kill:hover{color:var(--bad)}
 .statTbl{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
 .statTbl th{font:9px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim);text-align:right;padding:4px}

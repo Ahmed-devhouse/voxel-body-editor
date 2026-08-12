@@ -3,7 +3,7 @@
 // Format: https://github.com/ephtracy/voxel-model/blob/master/MagicaVoxel-file-format-vox.txt
 
 import { EMPTY, MAX_N, MIN_N } from './state.js';
-import { PALETTE, hexToRGB } from './palette.js';
+import { nearestPaletteIndex } from './palette.js';
 
 // MagicaVoxel's default palette (used when the file has no RGBA chunk).
 // Generated the same way MagicaVoxel does: 6-level RGB cube + ramps.
@@ -62,7 +62,8 @@ export function parseVox(buffer){
 }
 
 // Map a parsed .vox model into our cubic grid.
-// .vox is z-up: vox x → data x, vox y → data z, vox z → height (data y = N-1-h)
+// .vox is z-up: vox x → x (width), vox y → z (depth), vox z → y (height, 0 = bottom).
+// Colours map to the game palette (near-greys become X, the grey wildcard).
 export function voxToGrid(parsed){
   const { size, voxels, palette } = parsed;
   const maxDim = Math.max(size.x, size.y, size.z);
@@ -75,36 +76,23 @@ export function voxToGrid(parsed){
   const sz = Math.max(1, Math.round(size.z*scale));
   const offX = Math.floor((N - sx)/2);
   const offZ = Math.floor((N - sy)/2);
-  const offY = 0;                              // rest on the floor
 
-  // precompute palette index → game colour index
   const mapCache = new Map();
-  const gameRGB = PALETTE.map(hexToRGB).map(c => c.map(v => v*255));
-  const nearest = (r,g,b) => {
-    let best = 0, bd = Infinity;
-    for(let i=0;i<5;i++){
-      const d = (r-gameRGB[i][0])**2 + (g-gameRGB[i][1])**2 + (b-gameRGB[i][2])**2;
-      if(d < bd){ bd = d; best = i; }
-    }
-    return best;
-  };
-
-  const idx = (x,y,z) => x + y*N + z*N*N;
+  const idx = (x,y,z) => (x*N + y)*N + z;      // Unity CellIdx order
   const colours = new Uint8Array(N*N*N).fill(EMPTY);
   let placed = 0;
   for(const [vx, vy, vz, ci] of voxels){
     const x = offX + Math.min(sx-1, Math.floor(vx*scale));
-    const zz = offZ + Math.min(sy-1, Math.floor(vy*scale));
-    const h = offY + Math.min(sz-1, Math.floor(vz*scale));  // height above floor
-    const y = N-1-h;
-    if(x<0||zz<0||y<0||x>=N||zz>=N||y>=N) continue;
+    const z = offZ + Math.min(sy-1, Math.floor(vy*scale));
+    const y = Math.min(sz-1, Math.floor(vz*scale));   // height above floor, rests on ground
+    if(x<0||z<0||y<0||x>=N||z>=N||y>=N) continue;
     let game = mapCache.get(ci);
     if(game === undefined){
       const p = palette[ci] || [153,153,153,255];
-      game = nearest(p[0], p[1], p[2]);
+      game = nearestPaletteIndex(p[0], p[1], p[2]);
       mapCache.set(ci, game);
     }
-    colours[idx(x,y,zz)] = game;
+    colours[idx(x,y,z)] = game;
     placed++;
   }
   if(!placed) throw new Error('.vox model was empty after mapping');

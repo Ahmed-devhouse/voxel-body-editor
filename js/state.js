@@ -2,14 +2,17 @@
 // autosave and all views stay consistent.
 
 export const EMPTY = 255;
-export const MIN_N = 4, MAX_N = 40;
+// VoxelBody.size is [Range(3, 24)] in Unity — stay inside the supported envelope
+export const MIN_N = 3, MAX_N = 24;
 export const DEFAULT_GUID = '8154fcdcf86ef414a8a725fd872e9180';
 
 export function defaultMeta(){
   return {
     name: 'NewBody', displayName: 'New Body',
     depth: 11, smoothness: 47, alphaThreshold: 0.347, greyToWildcard: 1,
-    wrapInShell: 1, customCrateGrid: 1, crateRows: 10, misplayTolerance: 0,
+    // stock defaults: crate grid off = the game's demand-weighted board;
+    // CratePlan.DefaultRows = 3
+    wrapInShell: 1, customCrateGrid: 0, crateRows: 3, misplayTolerance: 0,
     scriptGuid: DEFAULT_GUID,
     sourceImageRaw: '{fileID: 0}', sourceSliceRaw: '{fileID: 0}',
     layerRules: [
@@ -58,11 +61,16 @@ export function on(type, fn){ bus.addEventListener(type, e => fn(e.detail)); }
 //  'palette'  display palette changed
 //  'model'    a whole new model was loaded (name fields etc. need rebinding)
 
-/* ---------- indexing ---------- */
-export const idx = (x,y,z) => x + y*state.N + z*state.N*state.N;
-// layer editor: slice s = height from bottom, viewed from above.
-// screen col = data x, screen row = data z, data y = N-1-s (data y grows downward)
-export const sliceIdx = (cx,cy,s) => idx(cx, state.N-1-s, cy);
+/* ---------- indexing ----------
+   Matches Unity's VoxelCore.CellIdx(i,j,k,n) = (i*n + j)*n + k exactly, with the
+   axis meanings verified against VoxelBodyGen + the ECS LevelBuilder:
+     x = width  (world X, left–right; slowest axis)
+     y = height (world Y, UP — y = 0 is the BOTTOM layer)
+     z = depth  (world Z, front–back; fastest axis)                         */
+export const idx = (x,y,z) => (x*state.N + y)*state.N + z;
+// layer editor: slice s = height layer y (0 = bottom), viewed from above.
+// screen col = x (width), screen row = z (depth)
+export const sliceIdx = (cx,cy,s) => (cx*state.N + s)*state.N + cy;
 export const inBounds = (x,y,z) => x>=0 && y>=0 && z>=0 && x<state.N && y<state.N && z<state.N;
 
 /* ---------- undo / redo ---------- */
@@ -128,16 +136,6 @@ export function voxelCount(){
   let n=0;
   for(let i=0;i<state.colours.length;i++) if(state.colours[i]!==EMPTY) n++;
   return n;
-}
-export function colourCounts(){
-  const c=[0,0,0,0,0]; let other=0;
-  for(let i=0;i<state.colours.length;i++){
-    const v=state.colours[i];
-    if(v===EMPTY) continue;
-    if(v<5) c[v]++; else other++;
-  }
-  c.other = other;
-  return c;
 }
 export function unitCount(){
   let n=0;

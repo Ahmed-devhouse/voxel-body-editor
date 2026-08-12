@@ -64,9 +64,9 @@ paid services: host it on GitHub Pages for free.
 | Layer editing | Top-down slices from bottom → up, onion skin, occupancy strip, coordinates overlay |
 | Tools | Build, paint, rectangle, erase, flood fill (2D area / 3D connected region), colour picker, unit placement; mirror-X / mirror-Z symmetry |
 | Model ops | Flip X/Y/Z, rotate 90°, shift on any axis, hollow (remove enclosed interior), resize grid with centering, undo/redo (200 steps) |
-| Import | Unity `.asset` (file or pasted YAML), MagicaVoxel `.vox` (colours mapped to the 5 game colours), PNG voxelizer approximating the Unity pipeline |
+| Import | Unity `.asset` (file or pasted YAML), MagicaVoxel `.vox` (colours mapped to the game palette, near-greys → X wildcard), PNG voxelizer approximating the Unity pipeline |
 | Export | Unity `.asset` byte-identical format, robust download fallbacks, copy-as-YAML, PNG screenshot |
-| Level design | Layer rules, unit rules, full crate-cell/refill economy editor with auto-fill, ammo-vs-voxel balance stats, validation warnings (completability, unit mismatches, disconnected islands) |
+| Level design | Layer rules, unit rules, the real 5-column crate board (column-major, per-crate flags, per-column refills) with auto-fill, ammo stats that include the checkered shell the game adds, validation for the traps the format hides (Auto cells inheriting an Empty refill, invalid unit kinds, units on empty cells, out-of-range colours, unit-rule mismatches, disconnected islands) |
 | Comfort | Keyboard shortcuts (press `?`), editable display palette, autosave, model library with thumbnails, shared team levels |
 
 ## Editing the format
@@ -76,10 +76,14 @@ exporter mirrors the exact field order of assets produced by the Unity tool.
 If `VoxelBody.cs` gains fields, extend `parseAsset`/`exportAsset` together and
 re-verify a round-trip (import a Unity-made asset, export, `diff`).
 
-Grid layout: the `colours`/`units` hex strings encode a `size³` cube, two hex
-chars per cell (`ff` = empty, `00–04` = colour index), ordered x, then y
-(downward), then z. `depth` is only the voxelizer parameter stored on the
-asset. The script GUID is editable under **Model → Unity wiring**.
+Grid layout (verified against the Unity project's `VoxelCore.CellIdx` and the
+ECS renderer): the `colours`/`units` hex strings encode a `size³` cube, two hex
+chars per cell, index `(x*size + y)*size + z` where **x = width, y = height
+(y 0 = bottom), z = depth**. Colour bytes: `ff` empty, `00`–`04` = Y O R G B,
+`05` = X grey wildcard (any bullet colour destroys it). Unit bytes: `00` none,
+`01` armoured, `04` hidden — bomb/rocket are boosters, never voxels. `depth`
+is only the voxelizer parameter stored on the asset. The script GUID is
+editable under **Model → Unity wiring**.
 
 ## Tech
 

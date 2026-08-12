@@ -52,7 +52,10 @@
       <svg viewBox="0 0 24 24"><path d="M14 6l4 4-8.5 8.5H7a1 1 0 0 1-1-1v-2.5z"/><path d="M13 7l2-2a2.1 2.1 0 0 1 3 0l1 1a2.1 2.1 0 0 1 0 3l-2 2"/></svg><span>PICK</span></button>
     <button class="toolbtn" data-tool="unit" title="Unit (U) — toggle a unit on a cube">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/></svg><span>UNIT</span></button>
-    <div id="kindWrap"><input type="number" id="unitKind" value="1" min="1" max="99" title="Unit kind value"><span class="railhead">kind</span></div>
+    <div id="kindWrap"><select id="unitKind" title="Unit kind — bomb/rocket are boosters, never voxels">
+      <option value="1" selected>armr</option>
+      <option value="4">hidn</option>
+    </select><span class="railhead">kind</span></div>
 
     <div class="railhead">Colours</div>
     <div id="palette"></div>
@@ -71,8 +74,8 @@
     <div class="shiftgrid">
       <button class="minibtn" data-shift="x,-1" title="Shift −X">x−</button>
       <button class="minibtn" data-shift="x,1" title="Shift +X">x+</button>
-      <button class="minibtn" data-shift="y,-1" title="Shift up">y+</button>
-      <button class="minibtn" data-shift="y,1" title="Shift down">y−</button>
+      <button class="minibtn" data-shift="y,1" title="Shift up">y+</button>
+      <button class="minibtn" data-shift="y,-1" title="Shift down">y−</button>
       <button class="minibtn" data-shift="z,-1" title="Shift −Z">z−</button>
       <button class="minibtn" data-shift="z,1" title="Shift +Z">z+</button>
     </div>
@@ -123,16 +126,16 @@
 
     <div class="tabpane active" id="tab-model">
       <div class="sechead">Grid</div>
-      <div class="frow"><label for="fSize">Size (cube)</label>
-        <span><input type="number" id="fSize" min="4" max="40"> <button id="btnResize">Apply</button></span></div>
-      <div class="frow"><label for="fDepth">Depth (voxelizer)</label><input type="number" id="fDepth" min="1" max="40"></div>
+      <div class="frow"><label for="fSize">Size (cube, 3–24)</label>
+        <span><input type="number" id="fSize" min="3" max="24"> <button id="btnResize">Apply</button></span></div>
+      <div class="frow"><label for="fDepth">Depth (voxelizer)</label><input type="number" id="fDepth" min="1" max="24"></div>
       <div class="sechead">Voxelizer params (stored on asset)</div>
       <div class="frow"><label for="fSmooth">Smoothness</label><input type="number" id="fSmooth" min="0" max="100"></div>
       <div class="frow"><label for="fAlpha">Alpha threshold</label><input type="number" id="fAlpha" min="0" max="1" step="0.001"></div>
       <div class="frow"><label for="fGrey">Grey → wildcard</label><input type="checkbox" id="fGrey"></div>
       <div class="sechead">Gameplay</div>
       <div class="frow"><label for="fShell">Wrap in shell</label><input type="checkbox" id="fShell"></div>
-      <div class="frow"><label for="fMisplay">Misplay tolerance</label><input type="number" id="fMisplay" min="0"></div>
+      <div class="frow"><label for="fMisplay">Misplay tolerance (0–0.5)</label><input type="number" id="fMisplay" min="0" max="0.5" step="0.01"></div>
       <div class="sechead">Display palette (this browser only)</div>
       <div id="palEdit" class="palEdit"></div>
       <div class="frow"><span class="note" style="margin:0">Exports store colour indices, never hex — match these to the game's real colours.</span>
@@ -153,12 +156,12 @@
 
     <div class="tabpane" id="tab-crates">
       <div class="frow"><label for="fCustomGrid">Custom crate grid</label><input type="checkbox" id="fCustomGrid"></div>
-      <div class="frow"><label for="fCrateRows">Crate rows</label><input type="number" id="fCrateRows" min="1"></div>
-      <div class="sechead">Crate cells <span><button id="autoCrates" title="Generate cells from voxel colour counts">auto-fill</button> <button id="addCrate">+ cell</button></span></div>
-      <div class="crateGrid" id="crateCells"></div>
-      <div class="sechead">Refills <button id="addRefill">+ refill</button></div>
-      <div class="crateGrid" id="crateRefills"></div>
-      <p class="note">Colour −1 = any/random. Flags come from the game code (sample uses 1 for cells, 8 for refills).</p>
+      <div class="frow"><label for="fCrateRows">Rows (row 0 = front)</label><input type="number" id="fCrateRows" min="1" max="64"></div>
+      <div class="sechead">Opening board — 5 columns <button id="autoCrates" title="Fill the whole board from voxel colour demand">auto-fill</button></div>
+      <div class="crateCols" id="crateCells"></div>
+      <div class="sechead">Column refills (forever, once the board runs out)</div>
+      <div class="crateCols" id="crateRefills"></div>
+      <p class="note">Colour “any” = demand-weighted. Flags: <b>P</b>lain, <b>C</b>oncealed, <b>K</b> chained, <b>E</b>mpty — none lit = Auto (the game rolls features). An <b>E</b> refill means that column never refills, making ammo finite.</p>
     </div>
 
     <div class="tabpane" id="tab-stats">
@@ -197,8 +200,8 @@
     <h2>Generate from image</h2>
     <div class="genRow"><label>Image</label><button id="pickImg">Choose PNG…</button><span id="imgName" class="mono dim"></span></div>
     <div id="imgPrev"><canvas id="imgSrcCv" width="128" height="128" title="Source"></canvas><canvas id="imgMaskCv" width="128" height="128" title="Voxel silhouette preview"></canvas></div>
-    <div class="genRow"><label for="gSize">Size</label><input type="range" id="gSize" min="6" max="40" value="14"><output id="oSize">14</output></div>
-    <div class="genRow"><label for="gDepth">Depth</label><input type="range" id="gDepth" min="2" max="40" value="11"><output id="oDepth">11</output></div>
+    <div class="genRow"><label for="gSize">Size</label><input type="range" id="gSize" min="3" max="24" value="14"><output id="oSize">14</output></div>
+    <div class="genRow"><label for="gDepth">Depth</label><input type="range" id="gDepth" min="2" max="24" value="11"><output id="oDepth">11</output></div>
     <div class="genRow"><label for="gAlpha">Alpha threshold</label><input type="range" id="gAlpha" min="0" max="100" value="35"><output id="oAlpha">0.35</output></div>
     <div class="genRow"><label for="gSmooth">Smoothness</label><input type="range" id="gSmooth" min="0" max="100" value="47"><output id="oSmooth">47</output></div>
     <div class="genRow"><label for="gRound">End rounding</label><input type="range" id="gRound" min="0" max="100" value="70"><output id="oRound">70</output></div>
@@ -234,7 +237,7 @@
       <tr><td><kbd>A</kbd></td><td>Build</td><td><kbd>B</kbd></td><td>Paint</td></tr>
       <tr><td><kbd>R</kbd></td><td>Rectangle</td><td><kbd>E</kbd></td><td>Erase</td></tr>
       <tr><td><kbd>G</kbd></td><td>Fill</td><td><kbd>I</kbd></td><td>Pick colour</td></tr>
-      <tr><td><kbd>U</kbd></td><td>Unit</td><td><kbd>1–5</kbd></td><td>Colour 0–4</td></tr>
+      <tr><td><kbd>U</kbd></td><td>Unit</td><td><kbd>1–6</kbd></td><td>Colour Y O R G B X</td></tr>
       <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Layer down / up</td><td><kbd>X</kbd> <kbd>Z</kbd></td><td>Toggle mirror X / Z</td></tr>
       <tr><td><kbd>Ctrl/⌘ Z</kbd></td><td>Undo</td><td><kbd>Ctrl/⌘ Y</kbd></td><td>Redo</td></tr>
       <tr><td><kbd>Ctrl/⌘ S</kbd></td><td>Export .asset</td><td><kbd>?</kbd></td><td>This help</td></tr>

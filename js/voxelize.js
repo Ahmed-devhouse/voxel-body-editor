@@ -137,11 +137,16 @@ export function voxelize(mask, opts){
   let seed = 1234567;
   const rnd = () => { seed = (seed*1103515245 + 12345) & 0x7fffffff; return seed/0x7fffffff; };
   for(const r of unitRules){
+    // Mirrors VoxelBody.GenUnitRules: kinds clamp into 1..4 and anything that
+    // isn't Armoured(1) or Hidden(4) is dropped — bomb/rocket are boosters and
+    // must never end up in a baked body's units blob.
+    const kind = Math.max(1, Math.min(4, r.kind|0));
+    if(kind !== 1 && kind !== 4) continue;
     const cand = [];
     for(let i=0;i<colours.length;i++) if(colours[i]!==EMPTY && layer[i]===r.layer) cand.push(i);
     for(let k=0; k<r.count && cand.length; k++){
       const pickI = cand.splice(Math.floor(rnd()*cand.length), 1)[0];
-      units[pickI] = r.kind;
+      units[pickI] = kind;
     }
   }
 

@@ -50,11 +50,33 @@ const reparsed = parseAsset(blankYaml);
 check('fresh model round-trips', exportAsset(reparsed) === blankYaml);
 check('voxelCount written', /voxelCount: 1\n$/.test(blankYaml));
 
-// regression: legitimate zero values must survive import → export unchanged
-const zeroYaml = blankYaml.replace('  depth: 11', '  depth: 0').replace('  crateRows: 10', '  crateRows: 0');
+// regression: legitimate zero values must survive import → export unchanged.
+// match by pattern, not by the current default's literal value — pinning "10"
+// here silently turned this half of the check into a no-op once the default moved.
+const zeroYaml = blankYaml.replace(/ {2}depth: \d+/, '  depth: 0')
+                          .replace(/ {2}crateRows: \d+/, '  crateRows: 0');
+check('substitution actually applied', /depth: 0\n/.test(zeroYaml) && /crateRows: 0\n/.test(zeroYaml));
 const zeroBack = exportAsset(parseAsset(zeroYaml));
 check('zero depth/crateRows round-trip', zeroBack === zeroYaml,
   (zeroBack.match(/depth: \d+/)||[])[0] + ', ' + (zeroBack.match(/crateRows: \d+/)||[])[0]);
+
+// regression: misplayTolerance is a float [Range(0,0.5)] — rounding it destroys
+// every legal value, and no project asset stores a non-zero one to catch it
+for(const v of ['0.1','0.25','0.3','0.5','0.30000001']){
+  const y = blankYaml.replace(/ {2}misplayTolerance: [\d.]+/, '  misplayTolerance: ' + v);
+  const p = parseAsset(y);
+  check('misplayTolerance ' + v + ' survives round-trip',
+    p.meta.misplayTolerance === parseFloat(v) && exportAsset(p) === y,
+    'parsed ' + p.meta.misplayTolerance);
+}
+
+// regression: an absent crateRows must fall back to Unity's field initializer
+// (CratePlan.DefaultRows = 3), not the bird sample's authored 10
+{
+  const noRows = blankYaml.replace(/ {2}crateRows: \d+\n/, '');
+  check('absent crateRows falls back to 3', parseAsset(noRows).meta.crateRows === 3,
+    String(parseAsset(noRows).meta.crateRows));
+}
 
 // regression: empty m_Name must fall back to a string, not an empty array
 const noName = parseAsset(blankYaml.replace(/ {2}m_Name: .*/, '  m_Name: '));

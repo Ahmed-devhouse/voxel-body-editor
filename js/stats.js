@@ -203,16 +203,27 @@ export function updateStats(){
     else if(holes)
       info.push(`${holes} authored hole(s) on the opening board.`);
     const refilling = unlimited.filter(Boolean).length;
-    if(refilling === 0){
+    if(refilling === 0)
       info.push('No column refills — the opening board is this level\'s entire ammo supply.');
-      const shortList = [];
-      for(let i=0;i<CRATE_COLOURS;i++)
-        if(need[i] > opening[i] + anyOpening)
-          shortList.push(`${COLOUR_LABELS[i]} ${opening[i] + anyOpening}/${need[i]}`);
-      if(shortList.length)
-        warn.push(`Opening rounds don't cover every voxel of: ${shortList.join(', ')} (rounds/voxels, shell included). Confirm with the Unity generator's balance probe before shipping — it simulates play, this panel only counts.`);
-    } else {
+    else
       info.push(`${refilling} colour(s) refill forever and can always be reached; opening rounds are a finite bonus on top.`);
+
+    // per-colour, not gated on "nothing refills": a colour with no refilling
+    // column is finite even when other colours refill forever
+    const shortList = [];
+    for(let i=0;i<CRATE_COLOURS;i++)
+      if(!unlimited[i] && need[i] > opening[i] + anyOpening)
+        shortList.push(`${COLOUR_LABELS[i]} ${opening[i] + anyOpening}/${need[i]}`);
+    if(shortList.length)
+      warn.push(`Opening rounds don't cover every voxel of: ${shortList.join(', ')} (rounds/voxels, shell included) and no column refills those colours. Confirm with the Unity generator's balance probe before shipping — it simulates play, this panel only counts.`);
+
+    // X voxels are killed by any colour, so they are charged against the pooled
+    // total rather than one colour — only meaningful while supply is finite
+    if(refilling === 0){
+      const targets = need.reduce((a,b)=>a+b, 0) + wild;
+      const supply = totalOpening + anyOpening;
+      if(supply < targets)
+        warn.push(`Total opening rounds (${supply}) are fewer than total voxels to destroy (${targets}${wild?`, including ${wild} X wildcard`:''}) with nothing refilling — the level cannot be cleared as authored.`);
     }
   }
 

@@ -78,7 +78,8 @@ function slotCard(list, i, rowLabel){
     emit('meta');
   }));
   d.querySelector('.kill').addEventListener('click', () => {
-    if(stored){ Object.assign(list[i], autoCell()); emit('meta'); }
+    // test the array live: commit() may have materialised this slot since render
+    if(i < list.length){ Object.assign(list[i], autoCell()); emit('meta'); }
     renderCrates();
   });
   return d;
@@ -149,7 +150,10 @@ export function initCrates(){
     for(let i=0;i<CRATE_COLOURS;i++){
       if(!slots[i]) continue;
       const per = Math.ceil(need[i]/slots[i]);
-      for(let s=0;s<slots[i];s++) cells.push({colour:i, rounds:per, chain:0, flags:0});
+      // Plain, never Auto: CratePlan.CellAt makes an Auto cell inherit its
+      // column refill's flags, and a refill carrying Empty would turn every
+      // generated crate into a hole. CratePlanGenerator writes Plain too.
+      for(let s=0;s<slots[i];s++) cells.push({colour:i, rounds:per, chain:0, flags:1});
     }
     // interleave colours so no column is one colour top to bottom
     cells.sort((a,b) => (a.rounds%7)-(b.rounds%7) || a.colour-b.colour);

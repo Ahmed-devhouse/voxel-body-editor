@@ -1,5 +1,6 @@
 // MagicaVoxel .vox importer. Reads the first model of a .vox file and maps
-// each voxel's palette colour to the nearest of the 5 game colour indices.
+// each voxel's palette colour to the game palette — the nearest of Y O R G B,
+// or X (grey wildcard) for low-saturation colours.
 // Format: https://github.com/ephtracy/voxel-model/blob/master/MagicaVoxel-file-format-vox.txt
 
 import { EMPTY, MAX_N, MIN_N } from './state.js';

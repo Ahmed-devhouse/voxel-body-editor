@@ -142,7 +142,7 @@ function wireTopbar(){
       meta.depth = grid.N;
       applyImported({ N: grid.N, colours: grid.colours, units: grid.units, meta },
         'Imported ' + grid.voxels + ' voxels from .vox' + (grid.scaled ? ' (scaled down to fit ' + grid.N + '³)' : '') +
-        ' — colours mapped to nearest of the 5 game colours');
+        ' — colours mapped to the game palette (near-greys → X wildcard)');
     }catch(err){
       toast('.vox import failed: ' + err.message, true);
     }
@@ -256,7 +256,8 @@ function bindModelFields(){
 function wireModelTab(){
   const set = (id, fn, ev) => $(id).addEventListener(ev || 'change', e => { fn(e.target); emit('meta'); });
   set('fDepth', t => state.meta.depth = Math.max(1, parseInt(t.value) || 1));
-  set('fSmooth', t => state.meta.smoothness = parseFloat(t.value) || 0);
+  set('fSmooth', t => state.meta.smoothness =
+    Math.min(100, Math.max(0, parseInt(t.value) || 0)));   // [Range(0, 100)] int
   set('fAlpha', t => state.meta.alphaThreshold = parseFloat(t.value) || 0);
   set('fGrey', t => state.meta.greyToWildcard = t.checked ? 1 : 0);
   set('fShell', t => state.meta.wrapInShell = t.checked ? 1 : 0);
@@ -265,8 +266,13 @@ function wireModelTab(){
   set('fGuid', t => state.meta.scriptGuid = t.value.trim() || defaultMeta().scriptGuid, 'input');
   set('fCustomGrid', t => { state.meta.customCrateGrid = t.checked ? 1 : 0; renderCrates(); });
   set('fCrateRows', t => {
-    const next = Math.min(64, Math.max(1, parseInt(t.value) || 1));  // CratePlan.MaxRows = 64
-    remapRows(state.meta.crateRows, next);   // keep columns intact when the stride changes
+    const raw = parseInt(t.value);
+    if(!Number.isFinite(raw)){ t.value = state.meta.crateRows; return; }  // don't collapse the board on a blank field
+    const next = Math.min(64, Math.max(1, raw));                          // CratePlan.MaxRows = 64
+    t.value = next;                                                       // show what was actually stored
+    if(next === state.meta.crateRows) return;
+    if(next < state.meta.crateRows) pushUndo();   // shrinking discards rows — make it undoable
+    remapRows(state.meta.crateRows, next);        // keep columns intact when the stride changes
     state.meta.crateRows = next;
     renderCrates();
   });

@@ -58,8 +58,11 @@ export function parseAsset(text){
   meta.greyToWildcard = Math.round(num(top.greyToWildcard));
   meta.wrapInShell    = Math.round(num(top.wrapInShell));
   meta.customCrateGrid= Math.round(num(top.customCrateGrid));
-  meta.crateRows      = ('crateRows' in top) ? Math.round(num(top.crateRows)) : 10;
-  meta.misplayTolerance = Math.round(num(top.misplayTolerance));
+  // absent → keep defaultMeta()'s value (CratePlan.DefaultRows = 3, matching
+  // VoxelBody's field initializer), not the bird sample's authored 10
+  meta.crateRows      = ('crateRows' in top) ? Math.round(num(top.crateRows)) : meta.crateRows;
+  // float [Range(0, 0.5)] — rounding would collapse the entire legal range to 0
+  meta.misplayTolerance = num(top.misplayTolerance);
   meta.layerRules     = listNum(top.layerRules, ['layer','colour','percent']);
   meta.unitRules      = listNum(top.unitRules, ['layer','kind','count']);
   meta.crateCells     = listNum(top.crateCells, ['colour','rounds','chain','flags']);

@@ -154,6 +154,39 @@ console.log('unity axis convention');
   }
 }
 
+/* ---------- 3d. a freshly authored asset is shaped like a real project one ---------- */
+console.log('fresh asset shape');
+{
+  const N = 6;
+  const colours = new Uint8Array(N**3).fill(EMPTY);
+  const units = new Uint8Array(N**3);
+  const gi = (x,y,z) => (x*N+y)*N+z;
+  for(let x=1;x<5;x++) for(let z=1;z<5;z++) for(let y=0;y<3;y++) colours[gi(x,y,z)] = (x+z)%2 ? 2 : 3;
+  units[gi(2,1,2)] = 1;
+  const meta = defaultMeta();
+  meta.name = 'TestCube_Body'; meta.displayName = 'Test Cube'; meta.depth = 4;
+  const fresh = exportAsset({N, colours, units, meta});
+
+  const fieldsOf = s => s.split('\n').filter(l => /^ {2}\w+:/.test(l)).map(l => l.split(':')[0].trim());
+  const realPath = '/Users/muhammadahmad/Unity-projects/Voxel_Volley/Assets/VoxelVolley/VoxelBodies/Fruits/fruits_0_Body.asset';
+  let real = null;
+  try{ real = readFileSync(realPath, 'utf8'); }catch{ /* project not present */ }
+  if(real)
+    check('field sequence identical to a real project asset',
+      JSON.stringify(fieldsOf(fresh)) === JSON.stringify(fieldsOf(real)),
+      fieldsOf(fresh).join(','));
+  check('grids are size³ hex and stable on re-export',
+    /colours: (\w+)/.exec(fresh)[1].length === N**3*2 &&
+    /units: (\w+)/.exec(fresh)[1].length === N**3*2 &&
+    exportAsset(parseAsset(fresh)) === fresh);
+  check('script GUID + class id point at VoxelBody',
+    /guid: 8154fcdcf86ef414a8a725fd872e9180/.test(fresh) &&
+    /Assembly-CSharp::VoxelVolley\.VoxelBody/.test(fresh));
+  check('only valid colour/unit bytes, units on solid cells',
+    [...colours].every(v => v===255 || v<6) &&
+    [...units].every((u,i) => !u || (u===1||u===4) && colours[i]!==255));
+}
+
 /* ---------- 4. every DOM id referenced in JS exists in index.html ---------- */
 console.log('dom ids');
 {

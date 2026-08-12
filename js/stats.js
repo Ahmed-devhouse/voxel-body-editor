@@ -183,7 +183,9 @@ export function updateStats(){
       <td class="badA">${body[i]}</td>${shelled?'<td>0</td>':''}` +
       (custom ? '<td colspan="2" style="text-align:left" class="badA">no crate can hit this</td>' : '') + '</tr>';
   }
-  const bodyTotal = body[0]+body[1]+body[2]+body[3]+body[4]+wild+beyond;
+  // body.other counts bytes with no palette entry at all — they are real voxels
+  // and must not be dropped from the total, or an all-junk model reads as empty
+  const bodyTotal = body[0]+body[1]+body[2]+body[3]+body[4]+wild+beyond+body.other;
   html += `<tr><td><b>total</b></td><td><b>${bodyTotal}</b></td>` +
     (shelled ? `<td><b>${shell.total}</b></td>` : '') +
     (custom ? `<td><b>${totalOpening + anyOpening}</b></td><td></td>` : '') + '</tr>';

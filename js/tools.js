@@ -83,24 +83,53 @@ export function sliceAction(col, row, right){
   // fill is an area operation — the brush does not apply, and it works on the
   // slice plane rather than the 3D region
   if(sel.tool === 'fill'){
-    const startIdx = sliceIdx(col, row, s);
-    const target = state.colours[startIdx];
+    const target = state.colours[sliceIdx(col, row, s)];
     const repl = right ? EMPTY : sel.colour;
     if(target === repl) return false;
+    // Flood against a snapshot of the plane. Testing the live grid would let the
+    // mirror writes below dam the flood at cells symmetry had already painted,
+    // stopping short of the clicked region's real edge — and leaving a result
+    // that is not even symmetric.
+    const plane = new Uint8Array(N*N);
+    for(let r=0;r<N;r++) for(let c=0;c<N;c++) plane[c + r*N] = state.colours[sliceIdx(c, r, s)];
     const q = [[col,row]];
-    const seen = new Set();
+    const seen = new Uint8Array(N*N);
     while(q.length){
       const [qc,qr] = q.pop();
       if(qc<0||qr<0||qc>=N||qr>=N) continue;
-      const key = qc + ',' + qr;
-      if(seen.has(key)) continue;
-      seen.add(key);
-      const qi = sliceIdx(qc, qr, s);
-      if(state.colours[qi] !== target) continue;
+      const k = qc + qr*N;
+      if(seen[k]) continue;
+      seen[k] = 1;
+      if(plane[k] !== target) continue;
       const [x,y,z] = sliceToCell(qc, qr, s);
       for(const [mx,my,mz] of mirroredCells(x,y,z)) setCell(idx(mx,my,mz), repl);
       changed = true;
       q.push([qc+1,qr],[qc-1,qr],[qc,qr+1],[qc,qr-1]);
+    }
+    return changed;
+  }
+
+  // Units mark one voxel at a time: they are individual gameplay pieces, not
+  // paint, and stamping a brush-worth of them (and materialising a voxel under
+  // each) is never what a click means. Matches hit3DAction's unit branch.
+  if(sel.tool === 'unit'){
+    const [ux,uy,uz] = sliceToCell(col, row, s);
+    const kind = Math.max(1, sel.unitKind|0);
+    const targets = mirroredCells(ux,uy,uz);
+    const clicked = idx(ux,uy,uz);
+    if(right){
+      for(const [mx,my,mz] of targets){
+        const i = idx(mx,my,mz);
+        if(state.units[i]){ state.units[i] = 0; changed = true; }
+      }
+      return changed;
+    }
+    const turnOff = state.units[clicked] === kind;   // toggle decided by the clicked cell
+    for(const [mx,my,mz] of targets){
+      const i = idx(mx,my,mz);
+      const nv = turnOff ? 0 : kind;
+      if(state.units[i] !== nv){ state.units[i] = nv; changed = true; }
+      if(nv !== 0 && state.colours[i] === EMPTY){ state.colours[i] = sel.colour; changed = true; }
     }
     return changed;
   }
@@ -116,13 +145,6 @@ export function sliceAction(col, row, right){
         if(state.colours[i] !== v){ setCell(i, v); changed = true; }
       } else if(sel.tool === 'erase'){
         if(state.colours[i] !== EMPTY || state.units[i]){ setCell(i, EMPTY); changed = true; }
-      } else if(sel.tool === 'unit'){
-        if(right){ if(state.units[i]){ state.units[i]=0; changed = true; } continue; }
-        const kind = Math.max(1, sel.unitKind|0);
-        const single = sel.brush === 1 && mirroredCells(x,y,z).length === 1;
-        const nv = (state.units[i] === kind && single) ? 0 : kind;
-        if(state.units[i] !== nv){ state.units[i] = nv; changed = true; }
-        if(nv !== 0 && state.colours[i] === EMPTY){ state.colours[i] = sel.colour; changed = true; }
       }
     }
   }
@@ -185,17 +207,25 @@ export function hit3DAction(hit, right){
   pushUndo();
   let touched = null;
 
-  // brush footprint on the plane facing the camera-clicked face; for a single
-  // cell this is just the cell itself
+  // Brush footprint in the plane of the CLICKED FACE, not of the 2D view's axis:
+  // a brush on a wall should spread across that wall, and one on the floor across
+  // the floor, regardless of which slice view happens to be open.
+  const faceAxis = (() => {
+    if(hit.floor || !hit.nb) return 'y';                     // ground plane
+    const dx = Math.abs(hit.nb[0] - cell[0]);
+    const dy = Math.abs(hit.nb[1] - cell[1]);
+    const dz = Math.abs(hit.nb[2] - cell[2]);
+    return dy ? 'y' : dx ? 'x' : 'z';                        // spread ⟂ the face normal
+  })();
   const patch = (p) => {
     if(sel.brush === 1) return [p];
-    const { col, row, s } = cellToSlice(p[0], p[1], p[2]);
+    const { col, row, s } = cellToSlice(p[0], p[1], p[2], faceAxis);
     const out = [];
     const N = state.N;
     for(const [dc,dr] of brushOffsets()){
       const c = col+dc, r = row+dr;
       if(c<0||r<0||c>=N||r>=N) continue;
-      out.push(sliceToCell(c, r, s));
+      out.push(sliceToCell(c, r, s, faceAxis));
     }
     return out;
   };

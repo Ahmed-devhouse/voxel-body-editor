@@ -97,7 +97,16 @@ export function initEditor3D(){
   on('grid', rebuild);
   on('gridsize', () => { layoutWorld(); rebuild(); });
   on('palette', recolour);
-  on('sel', () => { recolour(); refreshGhostColour(); });
+  on('sel', () => {
+    // The isolate cut decides which instances EXIST, so moving the slice or
+    // switching the view axis has to re-cut the mesh — recolouring alone would
+    // leave the raycaster picking cells the user just asked to hide. Done here
+    // rather than by emitting 'grid' from setSlice, because 'grid' also drives
+    // autosave and the O(N³) stats scan, and a slider drag would thrash both.
+    if(cutNeedsRebuild()) rebuild();
+    else recolour();
+    refreshGhostColour();
+  });
 
   layoutWorld(true);
   rebuild();
@@ -167,6 +176,14 @@ function ensureCapacity(){
 const _m = new THREE.Matrix4();
 const _col = new THREE.Color();
 
+// What the current instance set was cut with, so a 'sel' change can tell
+// whether the cut is stale or only the colours are.
+let cutIsolate = false, cutSlice = -1, cutAxis = null;
+function cutNeedsRebuild(){
+  if(!sel.isolate && !cutIsolate) return false;          // no cut either way
+  return sel.isolate !== cutIsolate || sel.slice !== cutSlice || sel.sliceAxis !== cutAxis;
+}
+
 function rebuild(){
   ensureCapacity();
   const N = state.N, c = state.colours;
@@ -184,6 +201,7 @@ function rebuild(){
   }
   voxMesh.count = count;
   voxMesh.instanceMatrix.needsUpdate = true;
+  cutIsolate = sel.isolate; cutSlice = sel.slice; cutAxis = sel.sliceAxis;
   applyColours(count);
   voxMesh.computeBoundingSphere();
   rebuildUnits();
@@ -231,6 +249,7 @@ function rebuildUnits(){
     const i = idx(x,y,z);
     const u = state.units[i];
     if(!u || state.colours[i] === EMPTY) continue;
+    if(sel.isolate && cellToSlice(x,y,z).s > sel.slice) continue;   // match rebuild()'s cut
     let sp = unitSprites[used];
     if(!sp){
       // depthTest off + high renderOrder: markers sit at cube centres, so with
@@ -324,7 +343,9 @@ function onUp(e){
   const h = pick(e);
   if(!h) return;
   const touched = hit3DAction(h, button === 2);
-  if(touched) setSlice(touched[1]);  // sync layer editor to build height (y = layer)
+  // follow the edit in whichever axis is being sliced — touched is a world cell,
+  // and sel.slice is an index along sel.sliceAxis, which is y only in the top view
+  if(touched) setSlice(cellToSlice(touched[0], touched[1], touched[2]).s);
   setHover(null, null);
 }
 

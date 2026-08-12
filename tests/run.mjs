@@ -276,6 +276,76 @@ console.log('slice + model ops');
   tools.sliceAction(1, 2, false);
   check('mirror X paints both sides', state.colours[idx(1,0,2)] === 1 && state.colours[idx(4,0,2)] === 1);
   sel.symX = false;
+
+  /* regressions for bugs the feature suite could not see */
+
+  // A mirrored flood fill must not dam itself on cells symmetry already painted.
+  // An L-shaped empty channel makes this visible: the only way into the leg is
+  // through (col 5, row 2), which is the mirror of the clicked (col 0, row 2) and
+  // so gets painted before the flood arrives. Testing the live grid then stops
+  // there and the leg is never reached.
+  build(6, (x,y,z) => {
+    if(y !== 0) return undefined;
+    const onBar = z === 2;                       // row 2, every column
+    const onLeg = x === 5 && z >= 3;             // and down the far side
+    return (onBar || onLeg) ? undefined : 2;     // channel empty, rest solid
+  });
+  sel.tool = 'fill'; sel.colour = 1; sel.symX = true; sel.slice = 0; sel.sliceAxis = 'y';
+  tools.sliceAction(0, 2, false);                // click the near end of the bar
+  check('mirrored flood fill reaches past its own mirror writes',
+    state.colours[idx(5,0,3)] === 1 && state.colours[idx(5,0,5)] === 1,
+    `leg cells: ${state.colours[idx(5,0,3)]}, ${state.colours[idx(5,0,5)]}`);
+  sel.symX = false; sel.tool = 'paint';
+
+  // the unit tool marks ONE voxel however big the brush is
+  build(6, () => 2);
+  sel.tool = 'unit'; sel.unitKind = 1; sel.brush = 4; sel.slice = 0;
+  tools.sliceAction(3, 3, false);
+  const unitsPlaced = state.units.reduce((a,v) => a + (v?1:0), 0);
+  check('unit tool ignores brush size', unitsPlaced === 1, String(unitsPlaced));
+  tools.sliceAction(3, 3, false);
+  check('unit toggles off on a second click', state.units.every(v => v === 0));
+  sel.brush = 1; sel.tool = 'paint';
+
+  // a 3D brush spreads across the plane of the clicked FACE, not of the 2D view.
+  // Clicking the top face of a floor voxel must lay a horizontal plate even
+  // while the front view is open.
+  build(6, (x,y,z) => y === 0 ? 2 : undefined);
+  sel.sliceAxis = 'z'; sel.brush = 2; sel.tool = 'build'; sel.colour = 1;
+  const beforePatch = count();
+  tools.hit3DAction({ cell:[2,0,2], nb:[2,1,2], floor:false }, false);
+  const added = count() - beforePatch;
+  check('3D brush follows the clicked face, not the view axis', added === 9, String(added));
+  let flat = true;
+  for(let z=1;z<4;z++) for(let x=1;x<4;x++) if(state.colours[idx(x,1,z)] !== 1) flat = false;
+  check('the 3D patch is a horizontal plate', flat);
+  sel.brush = 1; sel.sliceAxis = 'y'; sel.tool = 'paint';
+}
+
+/* ---------- 3b-quater. a 3D edit follows the slice axis ---------- */
+console.log('3D edit ↔ slice sync');
+{
+  const st = await import(join(root, 'js/state.js'));
+  const { state, sel, cellToSlice } = st;
+  state.N = 14;
+  // touched is a world cell; the slice cursor must move to its index along the
+  // CURRENT axis, which is y only in the top view
+  const touched = [3, 9, 4];
+  sel.sliceAxis = 'y';
+  check('top view syncs to y', cellToSlice(...touched).s === 9);
+  sel.sliceAxis = 'z';
+  check('front view syncs to z, not y', cellToSlice(...touched).s === 4);
+  sel.sliceAxis = 'x';
+  check('side view syncs to x, not y', cellToSlice(...touched).s === 3);
+  sel.sliceAxis = 'y';
+  const src = readFileSync(join(root, 'js/editor3d.js'), 'utf8');
+  check('editor3d uses cellToSlice for the sync, not touched[1]',
+    /setSlice\(cellToSlice\(touched\[0\], touched\[1\], touched\[2\]\)\.s\)/.test(src) &&
+    !/setSlice\(touched\[1\]\)/.test(src));
+  check('isolate re-cuts the mesh when the slice or axis moves',
+    /cutNeedsRebuild\(\)/.test(src) && /if\(cutNeedsRebuild\(\)\) rebuild\(\)/.test(src));
+  check('unit markers honour the isolate cut',
+    /rebuildUnits[\s\S]{0,600}sel\.isolate && cellToSlice\(x,y,z\)\.s > sel\.slice/.test(src));
 }
 
 /* ---------- 3c. every asset in the Unity project round-trips ---------- */

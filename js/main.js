@@ -232,7 +232,14 @@ function wireToolRail(){
     $('chkSymX').classList.toggle('on', sel.symX);
     $('chkSymZ').classList.toggle('on', sel.symZ);
   });
-  on('palette', () => { renderSwatches(); renderPaletteEditor(); renderColourSelects(); });
+  // 'palette' fires on every colour-well input tick, and renderCrates rebuilds up
+  // to 5×64 cards, so the heavier panels are debounced the way stats.js is.
+  let palTimer = null;
+  on('palette', () => {
+    renderSwatches(); renderPaletteEditor(); renderColourSelects();
+    clearTimeout(palTimer);
+    palTimer = setTimeout(() => { renderRules(); renderCrates(); }, 120);
+  });
 }
 
 /* ---------- palette ---------- */
@@ -243,7 +250,8 @@ function renderSwatches(){
     const b = document.createElement('button');
     b.className = 'swatch' + (i === sel.colour ? ' active' : '') + (isBeyondGame(i) ? ' beyond' : '');
     b.style.background = entry.hex;
-    b.title = entry.label + ' — ' + entry.name + (i < 9 ? ' (key ' + (i+1) + ')' : '') +
+    // only 1–6 select colours; 7/8/9 switch the slice view
+    b.title = entry.label + ' — ' + entry.name + (i < 6 ? ' (key ' + (i+1) + ')' : '') +
       (isBeyondGame(i) ? ' — beyond this game build' : '');
     b.innerHTML = '<b>' + escapeHtml(entry.label) + '</b>';
     b.addEventListener('click', () => setColour(i));
@@ -271,6 +279,22 @@ function dropColour(){
 function renderPaletteEditor(){
   const pe = $('palEdit');
   if(!pe) return;
+  // Refresh in place when the row count is unchanged. A full rebuild would
+  // detach the very colour well being dragged — its own 'input' event fires
+  // 'palette', and replacing the live input kills the drag after one tick.
+  // Adding, dropping or resetting changes the count and still rebuilds.
+  const rows = pe.querySelectorAll('.pe');
+  if(rows.length === PALETTE.length){
+    rows.forEach((wrap, i) => {
+      const entry = PALETTE[i];
+      wrap.classList.toggle('beyond', isBeyondGame(i));
+      const col = wrap.querySelector('input[type=color]');
+      const lab = wrap.querySelector('input[type=text]');
+      if(col && col !== document.activeElement && col.value !== entry.hex) col.value = entry.hex;
+      if(lab && lab !== document.activeElement && lab.value !== entry.label) lab.value = entry.label;
+    });
+    return;
+  }
   pe.innerHTML = '';
   PALETTE.forEach((entry, i) => {
     const wrap = document.createElement('div');
@@ -443,6 +467,9 @@ function colourOptions(v){
   // layer rules may use any voxel colour, X wildcard included (Range(0,5) in Unity)
   let h = '';
   for(let i=0;i<colourCount();i++) h += `<option value="${i}" ${v===i?'selected':''}>${labelOf(i)}</option>`;
+  // a stored colour outside the palette keeps its own option, so the select can
+  // never silently display 0 while the asset still holds something else
+  if(!(v >= 0 && v < colourCount())) h += `<option value="${v}" selected>colour ${v} ⚠</option>`;
   return h;
 }
 function renderRules(){

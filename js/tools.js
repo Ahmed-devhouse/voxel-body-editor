@@ -3,7 +3,7 @@
 // everywhere.
 
 import {
-  state, sel, clip, EMPTY, idx, sliceIdx, sliceToCell, cellToSlice, inBounds,
+  state, sel, clip, EMPTY, MIN_N, MAX_N, idx, sliceIdx, sliceToCell, cellToSlice, inBounds,
   pushUndo, popUndo, emit,
 } from './state.js';
 import { colourCount } from './palette.js';
@@ -460,7 +460,7 @@ export function trimToContent(margin = 0){
   const b = bounds();
   if(!b) return 'model is empty';
   const span = Math.max(b.x1-b.x0, b.y1-b.y0, b.z1-b.z0) + 1 + 2*Math.max(0, margin);
-  const nn = Math.max(3, Math.min(24, span));
+  const nn = Math.max(MIN_N, Math.min(MAX_N, span));
   if(nn === state.N) return 'already tight';
 
   pushUndo();

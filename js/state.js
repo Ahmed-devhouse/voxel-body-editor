@@ -2,8 +2,18 @@
 // autosave and all views stay consistent.
 
 export const EMPTY = 255;
-// VoxelBody.size is [Range(3, 24)] in Unity — stay inside the supported envelope
-export const MIN_N = 3, MAX_N = 24;
+
+/* ---------- grid size ----------
+   The asset stores a CUBE of `size`, so the build volume is always size³ —
+   non-cubic grids are not expressible in the format.
+
+   MAX_N is a MEMORY ceiling, not a design rule: nothing in the format or in the
+   game caps the size (VoxelCore is written for a variable grid), so this is only
+   about what a browser tab can hold. The grids are two byte-per-cell arrays, the
+   undo history keeps snapshots of them, and an export writes size³ × 2 hex chars
+   per grid — at 128³ that is ~4 MB live, and a ~17 MB .asset. Raise it if you
+   need to; it is one number.                                                  */
+export const MIN_N = 3, MAX_N = 128;
 export const DEFAULT_GUID = '8154fcdcf86ef414a8a725fd872e9180';
 
 export function defaultMeta(){
@@ -113,6 +123,20 @@ export function axisInfo(axis = sel.sliceAxis){
 /* ---------- undo / redo ---------- */
 const undoStack = [], redoStack = [];
 const MAX_UNDO = 200;
+// Snapshots are two byte-per-cell copies of the grid, so a deep history on a big
+// grid is what would actually exhaust the tab: 200 × 128³ × 2 would be ~840 MB.
+// The history is therefore bounded by BYTES as well as by count — at 14³ that is
+// still the full 200 steps, and at 128³ it keeps as many as fit.
+const MAX_UNDO_BYTES = 192 * 1024 * 1024;
+function snapshotBytes(s){ return s.c.length + s.u.length; }
+function trimHistory(){
+  if(undoStack.length > MAX_UNDO) undoStack.splice(0, undoStack.length - MAX_UNDO);
+  let bytes = 0;
+  for(const s of undoStack) bytes += snapshotBytes(s);
+  while(undoStack.length > 1 && bytes > MAX_UNDO_BYTES) bytes -= snapshotBytes(undoStack.shift());
+}
+/** How deep the undo history currently is — surfaced in the UI for big grids. */
+export const undoDepth = () => undoStack.length;
 // snapshots deep-copy meta too: model-replacing paths (import/new/library load)
 // swap state.meta wholesale, and rules/crates mutate it in place — undo must
 // restore the full model, not just the voxels.
@@ -124,7 +148,7 @@ function snapshot(){
 }
 export function pushUndo(){
   undoStack.push(snapshot());
-  if(undoStack.length > MAX_UNDO) undoStack.shift();
+  trimHistory();
   redoStack.length = 0;
 }
 export function popUndo(){ undoStack.pop(); }     // for no-op edits
@@ -151,6 +175,26 @@ export function setGrid(n, colours, units){
   if(sizeChanged) emit('gridsize');
   emit('grid');
 }
+/** Bounding box of the solid voxels in the CURRENT grid, or null when empty. */
+export function contentBounds(){
+  const N = state.N;
+  let x0=N,y0=N,z0=N,x1=-1,y1=-1,z1=-1;
+  for(let z=0;z<N;z++) for(let y=0;y<N;y++) for(let x=0;x<N;x++){
+    if(state.colours[(x*N+y)*N+z] === EMPTY) continue;
+    if(x<x0)x0=x; if(y<y0)y0=y; if(z<z0)z0=z;
+    if(x>x1)x1=x; if(y>y1)y1=y; if(z>z1)z1=z;
+  }
+  return x1 < 0 ? null : {x0,y0,z0,x1,y1,z1};
+}
+/**
+ * Does the model still fit after resizing to `nn`? Only false when the content's
+ * own span exceeds the new grid, i.e. when voxels genuinely have to be cut.
+ */
+export function resizeWouldClip(nn){
+  const b = contentBounds();
+  if(!b) return false;
+  return (b.x1-b.x0+1) > nn || (b.y1-b.y0+1) > nn || (b.z1-b.z0+1) > nn;
+}
 export function resizeGrid(nn){
   nn = Math.max(MIN_N, Math.min(MAX_N, nn|0));
   if(nn === state.N) return false;
@@ -158,12 +202,23 @@ export function resizeGrid(nn){
   const on = state.N, oc = state.colours, ou = state.units;
   const nc = new Uint8Array(nn*nn*nn).fill(EMPTY);
   const nu = new Uint8Array(nn*nn*nn);
-  const off = Math.floor((nn-on)/2);
+
+  // Keep the model's position relative to the grid centre, but clamp the shift so
+  // content that FITS is never cut. Plain centring loses a model resting on the
+  // floor when shrinking (y0 would go negative), which is exactly where bodies sit.
+  const b = contentBounds();
+  let ox = Math.floor((nn-on)/2), oy = ox, oz = ox;
+  if(b){
+    const fit = (off, lo, hi) => Math.max(-lo, Math.min(nn-1-hi, off));
+    if((b.x1-b.x0+1) <= nn) ox = fit(ox, b.x0, b.x1);
+    if((b.y1-b.y0+1) <= nn) oy = fit(oy, b.y0, b.y1);
+    if((b.z1-b.z0+1) <= nn) oz = fit(oz, b.z0, b.z1);
+  }
   for(let z=0; z<on; z++) for(let y=0; y<on; y++) for(let x=0; x<on; x++){
-    const tx=x+off, ty=y+off, tz=z+off;
+    const tx=x+ox, ty=y+oy, tz=z+oz;
     if(tx<0||ty<0||tz<0||tx>=nn||ty>=nn||tz>=nn) continue;
-    nc[tx+ty*nn+tz*nn*nn] = oc[x+y*on+z*on*on];
-    nu[tx+ty*nn+tz*nn*nn] = ou[x+y*on+z*on*on];
+    nc[(tx*nn+ty)*nn+tz] = oc[(x*on+y)*on+z];
+    nu[(tx*nn+ty)*nn+tz] = ou[(x*on+y)*on+z];
   }
   setGrid(nn, nc, nu);
   return true;

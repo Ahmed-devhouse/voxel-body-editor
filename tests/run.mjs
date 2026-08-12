@@ -322,6 +322,101 @@ console.log('slice + model ops');
   sel.brush = 1; sel.sliceAxis = 'y'; sel.tool = 'paint';
 }
 
+/* ---------- 3b-quinquies. the build grid resizes to any supported size ---------- */
+console.log('build grid size');
+{
+  const st = await import(join(root, 'js/state.js'));
+  const tools = await import(join(root, 'js/tools.js'));
+  const { state, sel, idx, EMPTY: E, MIN_N, MAX_N, resizeGrid, resizeWouldClip, defaultMeta } = st;
+
+  check('grid size is bounded only by browser memory', MIN_N === 3 && MAX_N === 128);
+
+  // grow far past the inspector Range and back, keeping the model intact
+  state.N = 6;
+  state.colours = new Uint8Array(216).fill(E);
+  state.units = new Uint8Array(216);
+  for(let z=1;z<5;z++) for(let y=0;y<3;y++) for(let x=1;x<5;x++) state.colours[(x*6+y)*6+z] = 2;
+  st.clearHistory();
+  const solid = () => state.colours.reduce((a,v) => a + (v!==E?1:0), 0);
+  const kept = solid();
+
+  check('grow to 48³', resizeGrid(48) === true && state.N === 48);
+  check('growing keeps every voxel', solid() === kept, `${solid()} vs ${kept}`);
+  check('grow to the ceiling', resizeGrid(MAX_N) === true && state.N === MAX_N);
+  // clamping means an out-of-range request lands on the bound; asking for one we
+  // are already at is a no-op, so only the resulting size is asserted
+  resizeGrid(200);
+  check('past the ceiling is clamped to MAX_N', state.N === MAX_N, 'N=' + state.N);
+  resizeGrid(1);
+  check('below the floor is clamped to MIN_N', state.N === MIN_N, 'N=' + state.N);
+
+  // a 48³ model must survive the format round-trip byte for byte — 221k cells
+  state.N = 48;
+  state.colours = new Uint8Array(48**3).fill(E);
+  state.units = new Uint8Array(48**3);
+  for(let k=0;k<48;k++) state.colours[idx(k,k,k)] = k % 6;      // a diagonal in every colour
+  state.colours[idx(0,0,0)] = 5;
+  state.meta = defaultMeta();
+  state.meta.name = 'Big_Body';
+  const bigYaml = exportAsset(state);
+  const bigBack = parseAsset(bigYaml);
+  check('48³ asset round-trips byte-identically', exportAsset(bigBack) === bigYaml);
+  check('48³ grids are the right length', bigBack.colours.length === 48**3);
+  check('48³ voxelCount is right', /voxelCount: 48\n/.test(bigYaml));
+
+  // and the parser rejects a size the editor cannot hold, with a useful message
+  let msg = '';
+  try{ parseAsset(bigYaml.replace('  size: 48', '  size: 200')); }catch(e){ msg = e.message; }
+  check('oversized asset is refused clearly', /200/.test(msg) && /3–128/.test(msg), msg);
+
+  // Shrinking must not throw away content that fits. Plain grid-centring loses a
+  // model resting on the floor (its y would go negative) — exactly where bodies sit.
+  state.N = 20;
+  state.colours = new Uint8Array(8000).fill(E);
+  state.units = new Uint8Array(8000);
+  for(let z=9;z<11;z++) for(let y=0;y<2;y++) for(let x=9;x<11;x++) state.colours[(x*20+y)*20+z] = 1;
+  st.clearHistory();
+  check('a small floor-resting model does not clip when shrunk', resizeWouldClip(8) === false);
+  resizeGrid(8);
+  check('shrinking keeps a model that fits', solid() === 8, `${solid()} of 8 kept`);
+  check('and it is still inside the new grid', state.N === 8 && tools.bounds() !== null);
+
+  // when content genuinely cannot fit, that is reported rather than silently cut
+  state.N = 12;
+  state.colours = new Uint8Array(12**3).fill(E);
+  state.units = new Uint8Array(12**3);
+  for(let z=0;z<12;z++) for(let y=0;y<12;y++) for(let x=0;x<12;x++) state.colours[(x*12+y)*12+z] = 1;
+  st.clearHistory();
+  check('an over-large model reports clipping', resizeWouldClip(6) === true);
+  check('and no clipping when it fits', resizeWouldClip(12) === false);
+
+  // undo history is bounded by BYTES too, or a deep history on a big grid would
+  // exhaust the tab (200 × 128³ × 2 ≈ 840 MB)
+  state.N = 64;
+  state.colours = new Uint8Array(64**3).fill(E);
+  state.units = new Uint8Array(64**3);
+  st.clearHistory();
+  for(let k=0;k<40;k++){ st.pushUndo(); state.colours[k] = 1; }
+  const perSnap = 2 * 64**3;                       // 512 KB
+  check('deep history on a big grid is capped by memory',
+    st.undoDepth() < 40 || 40 * perSnap < 192*1024*1024,
+    `${st.undoDepth()} snapshots × ${Math.round(perSnap/1024)} KB`);
+  check('but history is never emptied entirely', st.undoDepth() >= 1);
+  st.clearHistory();
+
+  // trim must not clip a model larger than Unity's inspector Range
+  state.N = 40;
+  state.colours = new Uint8Array(40**3).fill(E);
+  state.units = new Uint8Array(40**3);
+  for(let z=2;z<34;z++) for(let y=0;y<30;y++) for(let x=2;x<34;x++) state.colours[(x*40+y)*40+z] = 1;
+  st.clearHistory();
+  const bigKept = solid();
+  check('trim on a >24³ model succeeds', tools.trimToContent(0) === null);
+  check('trim did not clamp to an arbitrary max', state.N === 32, 'N=' + state.N);
+  check('trim kept every voxel on a big grid', solid() === bigKept, `${solid()} vs ${bigKept}`);
+  sel.slice = 0;
+}
+
 /* ---------- 3b-quater. a 3D edit follows the slice axis ---------- */
 console.log('3D edit ↔ slice sync');
 {

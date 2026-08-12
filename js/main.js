@@ -1,7 +1,7 @@
 // App bootstrap and wiring.
 
 import {
-  state, sel, EMPTY, defaultMeta,
+  state, sel, EMPTY, MIN_N, MAX_N, defaultMeta, resizeWouldClip,
   on, emit, pushUndo, undo, redo, setGrid, resizeGrid,
   voxelCount, serialize, deserialize,
 } from './state.js';
@@ -242,6 +242,37 @@ function wireToolRail(){
   });
 }
 
+/* ---------- build grid size ---------- */
+function syncSizeUI(){
+  const s = $('fSize'), r = $('fSizeRange');
+  if(!s) return;
+  s.value = state.N;
+  if(r) r.value = state.N;
+  document.querySelectorAll('[data-size]').forEach(b => {
+    const n = parseInt(b.dataset.size);
+    b.classList.toggle('on', n === state.N);
+  });
+  updateSizeNote(state.N);
+}
+function updateSizeNote(n){
+  const el = $('sizeNote');
+  if(!el) return;
+  const cells = n*n*n;
+  const shellN = state.meta.wrapInShell ? n + 4 : n;
+  const shell = state.meta.wrapInShell ? shellN**3 - (shellN-2)**3 : 0;
+  let msg = `<b>${n}³</b> = ${cells.toLocaleString()} cells`;
+  if(shell) msg += `; shelled, the level grid is ${shellN}³ and the shell alone adds ` +
+    `${shell.toLocaleString()} voxels to shoot`;
+  msg += '. Every body spans the same world size, so a bigger grid means finer voxels, not a bigger model.';
+  // measured: 128³ exports in ~230 ms to an 8 MB asset, so only really large
+  // grids are worth a word — 64³ is comfortable
+  if(cells > 500000)
+    msg += ` <span class="warnA">${cells.toLocaleString()} cells: rebuilds get slower, the undo history` +
+           ` gets shallower (it is memory-bounded) and the .asset will be around` +
+           ` ${Math.round(cells*4/1048576)} MB.</span>`;
+  el.innerHTML = msg;
+}
+
 /* ---------- palette ---------- */
 function renderSwatches(){
   const pal = $('palette');
@@ -429,11 +460,32 @@ function wireModelTab(){
     state.meta.crateRows = next;
     renderCrates();
   });
-  $('btnResize').addEventListener('click', () => {
-    if(resizeGrid(parseInt($('fSize').value) || state.N))
-      toast('Resized to ' + state.N + '³ (content centered)');
-    $('fSize').value = state.N;
+  /* ---------- build grid size ---------- */
+  const applySize = n => {
+    const want = Math.max(MIN_N, Math.min(MAX_N, n|0));
+    if(want === state.N){ syncSizeUI(); return; }
+    // only warn when voxels genuinely have to be cut — resizeGrid clamps the
+    // shift so anything that fits survives
+    if(resizeWouldClip(want) && !confirm(
+      `The model is bigger than ${want}³ and part of it will be cut off. ` +
+      `"trim" resizes to fit without losing anything. Continue?`)){
+      syncSizeUI();
+      return;
+    }
+    if(resizeGrid(want)) toast('Build grid is now ' + state.N + '³ (content centred)');
+    syncSizeUI();
+  };
+  $('btnResize').addEventListener('click', () => applySize(parseInt($('fSize').value) || state.N));
+  $('fSize').addEventListener('keydown', e => { if(e.key === 'Enter') applySize(parseInt($('fSize').value) || state.N); });
+  // the slider previews the number live and applies on release, so a drag does
+  // not rebuild the grid dozens of times
+  $('fSizeRange').addEventListener('input', e => {
+    $('fSize').value = e.target.value;
+    updateSizeNote(parseInt(e.target.value));
   });
+  $('fSizeRange').addEventListener('change', e => applySize(parseInt(e.target.value)));
+  document.querySelectorAll('[data-size]').forEach(b =>
+    b.addEventListener('click', () => applySize(parseInt(b.dataset.size))));
 
   renderPaletteEditor();
   renderColourSelects();
@@ -457,7 +509,8 @@ function wireModelTab(){
     toast(n ? `Deleted ${n} ${labelOf(c)} voxel(s)` : `No ${labelOf(c)} voxels`, !n);
   });
 
-  on('gridsize', () => { $('fSize').value = state.N; });
+  on('gridsize', syncSizeUI);
+  syncSizeUI();
 }
 
 /* =====================================================================

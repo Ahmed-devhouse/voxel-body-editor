@@ -167,11 +167,19 @@ table.rules .del:hover{border-color:var(--bad)}
 .note{color:var(--mut);font-size:11px;margin-top:10px;line-height:1.5}
 .okA{color:var(--good)}
 .badA{color:var(--bad)}
+.warnA{color:var(--acc)}
 ul.valid{list-style:none;font-size:12px;display:flex;flex-direction:column;gap:6px}
 ul.valid li{padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel2)}
 ul.valid li.vwarn{border-color:rgba(255,201,60,.4);color:var(--acc)}
 ul.valid li.vinfo{color:var(--mut)}
 ul.valid li.vok{color:var(--good)}
+
+/* grid size */
+input[type=range].wide{width:100%;accent-color:var(--acc);margin-bottom:6px}
+.sizePresets{display:flex;gap:3px;margin-bottom:6px;flex-wrap:wrap}
+.sizePresets .minibtn{width:auto;flex:1;min-width:26px;padding:2px 0}
+.sizePresets .minibtn.on{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+.sizePresets .minibtn.over{color:var(--acc)}
 
 /* palette editor */
 .palEdit{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:6px;margin-bottom:8px}

@@ -69,12 +69,49 @@ paid services: host it on GitHub Pages for free.
 | Slice editing | Cut along **any axis** — top view (stack layers bottom-up), front view (the elevation a sprite is drawn in), side view — with onion skin, occupancy strip, coordinate overlay, and a **tracing image** you can load behind the grid to draw over |
 | Tools | Build, paint, rectangle, **line**, erase, flood fill (slice area / 3D connected region), colour picker, unit placement; **brush sizes 1–4**; mirror-X / mirror-Z symmetry with live preview of every mirrored footprint |
 | Slice ops | Copy / paste a slice, duplicate it onto the neighbour and follow (hand extrusion), fill or empty a slice in one click |
-| Model ops | Flip X/Y/Z, rotate 90°, shift on any axis, hollow (remove enclosed interior), **centre** on the floor, **trim** the grid down to the model, resize with centering, undo/redo (200 steps) |
+| Build grid | Any cube size (slider, number field or presets) — see below; the model keeps its place when you resize and nothing that fits is ever cut |
+| Model ops | Flip X/Y/Z, rotate 90°, shift on any axis, hollow (remove enclosed interior), **centre** on the floor, **trim** the grid down to the model, undo/redo (memory-bounded history) |
 | Colours | The game's six (Y O R G B + X wildcard) with the real art hexes, each recolourable and relabellable; **add your own** past those six (see below); swap one colour for another or delete every voxel of a colour across the whole model |
 | Import | Unity `.asset` (file or pasted YAML), MagicaVoxel `.vox` (colours mapped to the game palette, near-greys → X wildcard), PNG voxelizer approximating the Unity pipeline |
 | Export | Unity `.asset` byte-identical format, robust download fallbacks, copy-as-YAML, PNG screenshot |
 | Level design | Layer rules, unit rules, the real 5-column crate board (column-major, per-crate flags, per-column refills) with auto-fill, ammo stats that include the checkered shell the game adds, validation for the traps the format hides (Auto cells inheriting an Empty refill, invalid unit kinds, units on empty cells, out-of-range colours, unit-rule mismatches, disconnected islands) |
 | Comfort | Keyboard shortcuts (press `?`), editable display palette, autosave, model library with thumbnails, shared team levels |
+
+## Build grid size
+
+The **Model** tab sets the grid: type a size, drag the slider, or take a preset
+(7 … 96). The model keeps its position when you resize, and shrinking only warns
+when voxels genuinely have to be cut — anything that still fits is preserved, so
+a body resting on the floor survives being shrunk. `trim` resizes to fit the
+model exactly without losing anything.
+
+Sizes are **not** capped to `VoxelBody.size`'s `[Range(3, 24)]`. That attribute
+only limits the inspector slider, not what deserializes, and `VoxelCore` is
+written for a variable grid — so any size imports and plays. Raise that `Range`
+in `VoxelBody.cs` if you want to drag the size in the inspector too, since a
+slider capped at 24 would otherwise snap a larger value down and leave `IsBaked`
+false.
+
+The only ceiling here is `MAX_N` in [`js/state.js`](js/state.js), currently
+**128**, and it is about browser memory rather than the format or the game.
+Measured round-trip cost (all byte-identical):
+
+| grid | cells | .asset | export | parse |
+|---|---|---|---|---|
+| 32³ | 32,768 | 0.1 MB | 4 ms | 3 ms |
+| 64³ | 262,144 | 1.0 MB | 30 ms | 16 ms |
+| 96³ | 884,736 | 3.4 MB | 89 ms | 45 ms |
+| 128³ | 2,097,152 | 8.0 MB | 228 ms | 90 ms |
+
+Undo keeps whole-grid snapshots, so its history is bounded by bytes as well as by
+step count — at 14³ that is the full 200 steps, and on a very large grid it keeps
+as many as fit rather than exhausting the tab. Raise `MAX_N` if you need more; it
+is one number.
+
+Remember that every body spans the same world size in game
+(`VoxelCore.ModelWorldSize`), so a bigger grid means **finer voxels**, not a
+bigger model — and with `wrapInShell` on, the shell scales with it too (the Model
+tab shows both counts).
 
 ## Adding colours past the game's six
 

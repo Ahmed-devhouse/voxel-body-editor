@@ -159,18 +159,36 @@ function makeCubeMaterial(){
 }
 let cubeMaterial = null;
 
-function ensureCapacity(){
-  const need = state.N ** 3;
+/**
+ * Grows the instance buffer to hold `need` cubes.
+ *
+ * Demand-driven rather than sized to N³: a 64³ grid would reserve 262k instances
+ * (and their matrices) for a model that usually holds a few thousand voxels. It
+ * grows in generous steps and never shrinks, so painting does not reallocate.
+ */
+function ensureCapacity(need){
   if(voxMesh && voxCapacity >= need) return;
+  const grown = Math.min(state.N ** 3, Math.max(4096, Math.ceil(need * 1.5)));
   if(voxMesh){ scene.remove(voxMesh); voxMesh.dispose(); }
   if(!cubeMaterial) cubeMaterial = makeCubeMaterial();
-  voxMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1), cubeMaterial, need);
+  voxMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1), cubeMaterial, grown);
   voxMesh.castShadow = true;
   voxMesh.receiveShadow = true;
   voxMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  voxCapacity = need;
-  cellOfInstance = new Int32Array(need);
+  voxCapacity = grown;
+  cellOfInstance = new Int32Array(grown);
   scene.add(voxMesh);
+}
+/** Cubes the current cut will draw — what ensureCapacity has to cover. */
+function visibleCount(){
+  const N = state.N, c = state.colours;
+  let n = 0;
+  for(let z=0; z<N; z++) for(let y=0; y<N; y++) for(let x=0; x<N; x++){
+    if(c[idx(x,y,z)] === EMPTY) continue;
+    if(sel.isolate && cellToSlice(x,y,z).s > sel.slice) continue;
+    n++;
+  }
+  return n;
 }
 
 const _m = new THREE.Matrix4();
@@ -185,7 +203,7 @@ function cutNeedsRebuild(){
 }
 
 function rebuild(){
-  ensureCapacity();
+  ensureCapacity(visibleCount());
   const N = state.N, c = state.colours;
   let count = 0;
   for(let z=0; z<N; z++) for(let y=0; y<N; y++) for(let x=0; x<N; x++){

@@ -197,8 +197,6 @@ export function updateStats(){
   const ruled = state.meta.unitRules.reduce((s,r) => s+r.count, 0);
 
   if(bodyTotal === 0) warn.push('Model is empty — nothing to export.');
-  if(state.N < 3 || state.N > 24)
-    warn.push(`Size ${state.N} is outside VoxelBody's supported range (3–24) and will be clamped in Unity.`);
   if(beyond)
     warn.push(`${beyond} voxel(s) use colour ${GAME_COLOURS} or above. This game build renders those magenta and no crate can ever mint their colour, so the level cannot be cleared. Extend <b>Palette.Colours</b> and <b>Cols</b> in Unity (and <b>CrateColourCount</b> if they should be shootable), then raise GAME_COLOURS in palette.js.`);
   if(body.other)

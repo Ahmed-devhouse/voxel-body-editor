@@ -3,7 +3,7 @@
 // produced by the Unity tool — verified byte-identical on a round-trip of a
 // real asset. Change with care: the Unity importer and this file must agree.
 
-import { EMPTY, DEFAULT_GUID, defaultMeta } from './state.js';
+import { EMPTY, DEFAULT_GUID, defaultMeta, MIN_N, MAX_N } from './state.js';
 
 export function parseAsset(text){
   const lines = text.split(/\r?\n/);
@@ -33,7 +33,8 @@ export function parseAsset(text){
 
   const num = v => { const f = parseFloat(v); return Number.isFinite(f) ? f : 0; };
   const size = Math.round(num(top.size)) || Math.round(Math.cbrt((top.colours||'').length/2));
-  if(size < 2 || size > 64) throw new Error('Bad grid size: ' + size);
+  if(size < MIN_N || size > MAX_N)
+    throw new Error(`Bad grid size ${size} — this editor handles ${MIN_N}–${MAX_N}.`);
   const cells = size*size*size;
   const hexToArr = (hex, fillv) => {
     const a = new Uint8Array(cells).fill(fillv);

@@ -159,10 +159,23 @@
     </div>
 
     <div class="tabpane active" id="tab-model">
-      <div class="sechead">Grid</div>
-      <div class="frow"><label for="fSize">Size (cube, 3–24)</label>
-        <span><input type="number" id="fSize" min="3" max="24"> <button id="btnResize">Apply</button></span></div>
-      <div class="frow"><label for="fDepth">Depth (voxelizer)</label><input type="number" id="fDepth" min="1" max="24"></div>
+      <div class="sechead">Build grid</div>
+      <div class="frow"><label for="fSize">Size (cube)</label>
+        <span><input type="number" id="fSize" min="3" max="128"> <button id="btnResize">Apply</button></span></div>
+      <input type="range" id="fSizeRange" min="3" max="128" class="wide" aria-label="Grid size">
+      <div class="sizePresets">
+        <button class="minibtn" data-size="7">7</button>
+        <button class="minibtn" data-size="10">10</button>
+        <button class="minibtn" data-size="14">14</button>
+        <button class="minibtn" data-size="18">18</button>
+        <button class="minibtn" data-size="24">24</button>
+        <button class="minibtn" data-size="32">32</button>
+        <button class="minibtn" data-size="48">48</button>
+        <button class="minibtn" data-size="64">64</button>
+        <button class="minibtn" data-size="96">96</button>
+      </div>
+      <p class="note" id="sizeNote"></p>
+      <div class="frow"><label for="fDepth">Depth (voxelizer)</label><input type="number" id="fDepth" min="1" max="128"></div>
       <div class="sechead">Voxelizer params (stored on asset)</div>
       <div class="frow"><label for="fSmooth">Smoothness</label><input type="number" id="fSmooth" min="0" max="100"></div>
       <div class="frow"><label for="fAlpha">Alpha threshold</label><input type="number" id="fAlpha" min="0" max="1" step="0.001"></div>

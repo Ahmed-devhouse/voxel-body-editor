@@ -250,6 +250,42 @@ check('trim undoes to the original size', await page.inputValue('#fSize') === si
   check('junk colour flagged as having no palette entry', /no palette entry/.test(v), v.slice(0,150));
 }
 
+/* ---------- a large build grid is usable, not just resizable ---------- */
+await page.click('#btnSample');
+await page.waitForTimeout(700);
+await page.click('#tabs button[data-tab="model"]');
+await page.waitForTimeout(250);
+check('size presets offered', await page.locator('[data-size]').count() >= 6);
+check('presets reach well past 24', await page.locator('[data-size="96"]').count() === 1);
+await page.click('[data-size="32"]');
+await page.waitForTimeout(900);
+check('preset resizes the build grid', await page.inputValue('#fSize') === '32');
+check('resizing kept every voxel', await vox() === 976, String(await vox()));
+check('size note reports the real cell count', /32,768 cells/.test(await page.textContent('#sizeNote')),
+  (await page.textContent('#sizeNote')).slice(0,80));
+// the slice slider must span the new grid, and a 32³ grid must still paint
+check('slider spans the bigger grid', await page.getAttribute('#sliceRange', 'max') === '31');
+await page.keyboard.press('b');
+const gb = await page.locator('#sliceCanvas').boundingBox();
+const pre = await vox();
+await page.mouse.click(gb.x + gb.width*0.5, gb.y + gb.height*0.5);
+await page.waitForTimeout(350);
+check('a 32³ grid still paints', await vox() === pre + 1, `${pre} → ${await vox()}`);
+// and the 3D view must still be pickable at that size
+const vb = await page.locator('#viewPane canvas').boundingBox();
+await page.keyboard.press('a');
+const pre3d = await vox();
+await page.mouse.click(vb.x + vb.width/2, vb.y + vb.height/2);
+await page.waitForTimeout(400);
+check('3D building works on a 32³ grid', await vox() === pre3d + 1, `${pre3d} → ${await vox()}`);
+// export at 32³ must still parse back identically
+await page.click('#btnCopy');
+await page.waitForTimeout(400);
+const bigYaml = await page.evaluate(() => navigator.clipboard.readText());
+check('32³ export declares the new size', /\n {2}size: 32\n/.test(bigYaml));
+check('32³ grids are the right length',
+  (bigYaml.match(/\n {2}colours: (\w+)/) || ['',''])[1].length === 32**3*2);
+
 /* ---------- export still byte-identical after a tour ---------- */
 await page.click('#btnSample');
 await page.waitForTimeout(700);

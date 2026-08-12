@@ -1,12 +1,17 @@
-// Browser test for the editing-comfort features: slice axis views, brush size,
-// line tool, slice copy/paste/duplicate/fill/clear, isolate, palette add/remove,
-// recolour, centre/trim, and tracing overlay.
+// Browser test for the editing features: slice axis views, brush size, line tool,
+// slice copy/paste/duplicate/fill/clear, isolate, palette add/remove, recolour,
+// centre/trim, unknown colour bytes, and export fidelity after a full tour.
+//
+// Needs a real browser, so it is not part of `npm test`:
+//     npm i --no-save playwright-core     (and Google Chrome installed)
+//     node tests/browser-features.mjs
 import { chromium } from 'playwright-core';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, normalize, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = '/Users/muhammadahmad/voxel-body-editor';
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
   '.json':'application/json', '.asset':'text/plain' };
 const server = createServer(async (req,res) => {

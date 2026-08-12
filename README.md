@@ -30,8 +30,13 @@ paid services: host it on GitHub Pages for free.
    `https://<you>.github.io/voxel-body-editor/`. Share that URL with the team.
 
 > Local development: ES modules need an HTTP server (not `file://`).
-> Run `python3 -m http.server` in the repo folder and open
+> Run `npm start` (or `python3 -m http.server`) in the repo folder and open
 > `http://localhost:8000`.
+>
+> Tests: `npm test` runs the dependency-free suite (format round-trip against
+> every asset in the Unity project, the slice-axis mapping, edit operations).
+> `npm run test:browser` drives the real UI in headless Chrome and needs
+> `npm i --no-save playwright-core` plus Google Chrome.
 
 ## Team workflow (2–3 people, all free)
 

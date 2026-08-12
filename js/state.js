@@ -25,6 +25,9 @@ export function defaultMeta(){
     wrapInShell: 1, customCrateGrid: 0, crateRows: 3, misplayTolerance: 0,
     scriptGuid: DEFAULT_GUID,
     sourceImageRaw: '{fileID: 0}', sourceSliceRaw: '{fileID: 0}',
+    // null = render with the game's shared Palette.cs. An array of
+    // {r,g,b,a} means this body carries its own colours (VoxelBody.palette).
+    palette: null,
     layerRules: [
       {layer:0, colour:2, percent:100}, {layer:1, colour:3, percent:100},
       {layer:2, colour:4, percent:100}, {layer:3, colour:0, percent:100},

@@ -7,6 +7,6 @@
   "scripts": {
     "start": "python3 -m http.server 8000",
     "test": "node tests/run.mjs",
-    "test:browser": "node tests/browser-features.mjs"
+    "test:browser": "node tests/browser-features.mjs && node tests/browser-palette.mjs"
   }
 }

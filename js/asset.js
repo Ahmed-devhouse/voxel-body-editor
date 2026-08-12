@@ -20,6 +20,16 @@ export function parseAsset(text){
     const list = [];
     i++;
     while(i < lines.length){
+      // an inline map element, e.g. Color32: `- {r: 232, g: 201, b: 58, a: 255}`
+      const inline = lines[i].match(/^  - \{(.*)\}\s*$/);
+      if(inline){
+        const o = {};
+        for(const pair of inline[1].split(',')){
+          const kv = pair.split(':');
+          if(kv.length === 2) o[kv[0].trim()] = kv[1].trim();
+        }
+        list.push(o); i++; continue;
+      }
       const it = lines[i].match(/^  - (\w+): ?(.*)$/);
       const cont = lines[i].match(/^    (\w+): ?(.*)$/);
       if(it){ list.push({[it[1]]: it[2]}); i++; }
@@ -69,6 +79,17 @@ export function parseAsset(text){
   meta.crateCells     = listNum(top.crateCells, ['colour','rounds','chain','flags']);
   meta.crateRefills   = listNum(top.crateRefills, ['colour','rounds','chain','flags']);
   meta.layerPatterns  = Array.isArray(top.layerPatterns) ? top.layerPatterns : [];
+  // palette: Unity writes a Color32[] as `- {r: 232, g: 201, b: 58, a: 255}` per entry.
+  // Absent or empty means "use the shared art palette", which is how every asset
+  // authored before this field reads — so those still round-trip untouched.
+  if(Array.isArray(top.palette) && top.palette.length){
+    meta.palette = top.palette.map(o => ({
+      r: Math.max(0, Math.min(255, Math.round(num(o.r)))),
+      g: Math.max(0, Math.min(255, Math.round(num(o.g)))),
+      b: Math.max(0, Math.min(255, Math.round(num(o.b)))),
+      a: o.a === undefined ? 255 : Math.max(0, Math.min(255, Math.round(num(o.a)))),
+    }));
+  }
   const g = (top.m_Script||'').match(/guid: (\w+)/);
   meta.scriptGuid = g ? g[1] : DEFAULT_GUID;
   if(typeof top.sourceImage === 'string' && top.sourceImage.startsWith('{')) meta.sourceImageRaw = top.sourceImage;
@@ -98,6 +119,13 @@ export function exportAsset({N, colours, units, meta}){
   L.push('  displayName: ' + meta.displayName);
   L.push('  sourceImage: ' + meta.sourceImageRaw);
   L.push('  sourceSlice: ' + meta.sourceSliceRaw);
+  // only written when the body actually carries a palette, so an asset that uses
+  // the shared one exports exactly as it was imported
+  if(Array.isArray(meta.palette) && meta.palette.length){
+    L.push('  palette:');
+    for(const c of meta.palette)
+      L.push(`  - {r: ${c.r}, g: ${c.g}, b: ${c.b}, a: ${c.a === undefined ? 255 : c.a}}`);
+  }
   L.push('  size: ' + N);
   L.push('  depth: ' + meta.depth);
   L.push('  smoothness: ' + fmtNum(meta.smoothness));

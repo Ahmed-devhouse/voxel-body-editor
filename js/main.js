@@ -9,6 +9,7 @@ import { parseAsset, exportAsset } from './asset.js';
 import {
   PALETTE, GAME_COLOURS, MAX_COLOURS, colourCount, labelOf, isBeyondGame,
   setPaletteColour, setPaletteLabel, addPaletteColour, removeLastPaletteColour, resetPalette,
+  adoptModelPalette, commitPaletteToModel, clearModelPalette, modelCarriesPalette,
 } from './palette.js';
 import {
   setTool, setColour, setSlice, setSliceAxis, setBrush,
@@ -274,6 +275,10 @@ function updateSizeNote(n){
 }
 
 /* ---------- palette ---------- */
+function syncPaletteOwnership(){
+  const own = $('palOwn');
+  if(own) own.checked = modelCarriesPalette();
+}
 function renderSwatches(){
   const pal = $('palette');
   pal.innerHTML = '';
@@ -310,6 +315,7 @@ function dropColour(){
 function renderPaletteEditor(){
   const pe = $('palEdit');
   if(!pe) return;
+  syncPaletteOwnership();      // before the in-place fast path below returns
   // Refresh in place when the row count is unchanged. A full rebuild would
   // detach the very colour well being dragged — its own 'input' event fires
   // 'palette', and replacing the live input kills the drag after one tick.
@@ -344,10 +350,14 @@ function renderPaletteEditor(){
     pe.appendChild(wrap);
   });
   const note = $('palNote');
-  if(note) note.innerHTML = 'Exports store colour <b>indices</b>, never hex — index 0 is the game\'s Y. ' +
-    'Colours 0–' + (GAME_COLOURS-1) + ' are what the shipped build understands (0–4 are crate colours, 5 is the X wildcard any bullet clears). ' +
-    'Anything past that is marked in red: you can paint and export it, but the game renders it magenta and no crate can ever hit it until ' +
-    '<b>Palette.Colours</b> and <b>Cols</b> are extended in Unity.';
+  if(note) note.innerHTML =
+    'A voxel stores a colour <b>index</b>, never a hex code — the index is what a bullet matches on and ' +
+    'what crates are minted in, so it cannot be an arbitrary RGB value. What each index <i>looks like</i> ' +
+    'is the palette, and with the box above ticked it is written into the asset as <b>VoxelBody.palette</b>, ' +
+    'so the game renders exactly these colours for this body. Unticked, the body uses the shared ' +
+    '<b>Palette.cs</b> and the swatches here are only a preview. Colours 0\u20134 are the crate colours, ' +
+    '5 is the X wildcard any bullet clears; anything past ' + (GAME_COLOURS-1) + ' still needs <b>Cols</b> ' +
+    'extended in Unity before a crate can hit it.';
 }
 function renderColourSelects(){
   const opts = PALETTE.map((e,i) =>
@@ -490,6 +500,15 @@ function wireModelTab(){
   renderPaletteEditor();
   renderColourSelects();
   $('palAdd2').addEventListener('click', addColour);
+  $('palOwn').addEventListener('change', e => {
+    if(e.target.checked){
+      commitPaletteToModel();
+      toast('These colours now ship in the .asset — VoxelBody.palette overrides Palette.cs for this body');
+    }else{
+      clearModelPalette();
+      toast('Back to the game\'s shared palette; the asset no longer carries colours');
+    }
+  });
   $('palReset').addEventListener('click', () => {
     resetPalette();
     if(sel.colour >= colourCount()) setColour(colourCount()-1);
@@ -780,7 +799,7 @@ async function boot(){
   initSlice();
   initEditor3D();
 
-  on('model', () => { bindModelFields(); renderRules(); renderCrates(); });
+  on('model', () => { adoptModelPalette(); bindModelFields(); renderRules(); renderCrates(); });
   on('gridsize', bindModelFields);
 
   // autosave: any change persists (debounced) for crash recovery

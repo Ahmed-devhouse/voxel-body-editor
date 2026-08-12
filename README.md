@@ -71,7 +71,7 @@ paid services: host it on GitHub Pages for free.
 | Slice ops | Copy / paste a slice, duplicate it onto the neighbour and follow (hand extrusion), fill or empty a slice in one click |
 | Build grid | Any cube size (slider, number field or presets) — see below; the model keeps its place when you resize and nothing that fits is ever cut |
 | Model ops | Flip X/Y/Z, rotate 90°, shift on any axis, hollow (remove enclosed interior), **centre** on the floor, **trim** the grid down to the model, undo/redo (memory-bounded history) |
-| Colours | The game's six (Y O R G B + X wildcard) with the real art hexes, each recolourable and relabellable; **add your own** past those six (see below); swap one colour for another or delete every voxel of a colour across the whole model |
+| Colours | The game's six (Y O R G B + X wildcard) with the real art hexes, each recolourable and relabellable; **ship your colours inside the asset** so the game renders exactly what you see (see below); add your own past those six; swap one colour for another or delete every voxel of a colour model-wide |
 | Import | Unity `.asset` (file or pasted YAML), MagicaVoxel `.vox` (colours mapped to the game palette, near-greys → X wildcard), PNG voxelizer approximating the Unity pipeline |
 | Export | Unity `.asset` byte-identical format, robust download fallbacks, copy-as-YAML, PNG screenshot |
 | Level design | Layer rules, unit rules, the real 5-column crate board (column-major, per-crate flags, per-column refills) with auto-fill, ammo stats that include the checkered shell the game adds, validation for the traps the format hides (Auto cells inheriting an Empty refill, invalid unit kinds, units on empty cells, out-of-range colours, unit-rule mismatches, disconnected islands) |
@@ -113,34 +113,55 @@ Remember that every body spans the same world size in game
 bigger model — and with `wrapInShell` on, the shell scales with it too (the Model
 tab shows both counts).
 
-## Adding colours past the game's six
+## Colours: indices, and the palette that resolves them
 
-The palette's first six entries **are** the game's colours (`Cols` in
-`VoxelCore.cs`): `0` Y, `1` O, `2` R, `3` G, `4` B, `5` X — the grey wildcard any
-bullet clears. Crates only ever carry `0`–`4` (`Cols.CrateColourCount`).
+A voxel stores a **colour index**, one byte, never a hex code — and that is not a
+storage trick. The index is the key the core mechanic matches on:
 
-You can add more colours in the editor (`+ col` in the rail, or **+ colour** on
-the Model tab) and paint and export them. They are flagged red, and the Stats
-tab reports them as an error, because the **shipped game cannot use them**:
-`Palette.Of` renders anything ≥ 6 magenta, and since no crate can ever mint that
-colour, such a voxel can never be shot — the level becomes unwinnable.
+```csharp
+// VoxelCore.cs — a bullet can only destroy a voxel it matches
+Matches(byte bullet, byte voxel) => bullet == Cols.W || voxel == Cols.X || bullet == voxel;
+```
 
-To make a seventh colour real, change three things in Unity and then one here:
+Crates are minted in a colour index too (`CrateSpec.Colour`), and
+`Cols.CrateColourCount` sizes the demand arrays in `BalanceSim` and
+`CratePlanAnalysis`. So a voxel's colour has to come from a small closed set —
+with arbitrary RGB there would be 16.7M possible voxel colours and a bullet could
+essentially never equal one.
 
-1. `Assets/VoxelVolley/Runtime/Core/VoxelCore.cs` — add the constant to `Cols`,
-   and raise `CrateColourCount` **only if** crates should carry it (that constant
-   sizes colour arrays across the runtime, the sim and the crate grid UI, which
-   is laid out in 5 columns — so raising it is a real design change, not a
-   one-liner).
-2. `Assets/VoxelVolley/Runtime/Palette.cs` — append the render colour to
-   `Palette.Colours`.
-3. Re-run the project's tests (`VoxelVolley.Tests.Editor`) and the body
-   validator (`Voxel Volley → Validate Voxel Bodies`).
-4. Here: raise `GAME_COLOURS` in [`js/palette.js`](js/palette.js). That single
-   number is what the red flags and the Stats error are gated on.
+What each index **looks like** is a separate question, and the asset can answer it.
+Tick **Ship colours with this asset** on the Model tab (editing any swatch ticks it
+for you) and the palette is written into the `.asset` as `VoxelBody.palette`, a
+`Color32` per index:
 
-Until then, treat the extras as a scratch palette — useful for blocking out a
-model before committing it to real game colours.
+```yaml
+  palette:
+  - {r: 232, g: 201, b: 58, a: 255}
+  - {r: 245, g: 146, b: 11, a: 255}
+  - {r: 0, g: 255, b: 0, a: 255}      # this body's R renders bright green
+  ...
+```
+
+`Palette.SetActive` points rendering at it when the level is built, so the game
+draws exactly the colours you picked — no code change per palette. Untick it and
+the body falls back to the shared `Palette.cs`, and the field is dropped from the
+asset entirely, which is why every asset authored before this still exports
+byte-for-byte as imported.
+
+Adding colours **past the six** works the same way, with one caveat that the
+palette cannot fix: `Cols` still has no constant for index 6, so no crate can be
+minted in it and the voxel can never be shot. Those swatches are flagged red and
+Stats reports them as an error. To make a seventh colour fully real:
+
+1. `Runtime/Core/VoxelCore.cs` — add the constant to `Cols`, and raise
+   `CrateColourCount` **only if** crates should carry it (that constant sizes
+   colour arrays across the runtime, the sim and the 5-column crate grid, so it is
+   a real design change).
+2. Raise `GAME_COLOURS` in [`js/palette.js`](js/palette.js).
+3. Re-run the project's tests and `Voxel Volley → Validate Voxel Bodies`.
+
+`Palette.Colours` no longer needs touching for a new colour if the body ships its
+own palette — only `Cols` does, because that is the gameplay half.
 
 ## Editing the format
 

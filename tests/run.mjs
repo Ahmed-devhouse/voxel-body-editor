@@ -322,6 +322,42 @@ console.log('slice + model ops');
   sel.brush = 1; sel.sliceAxis = 'y'; sel.tool = 'paint';
 }
 
+/* ---------- 3a-bis. the palette travels with the asset ---------- */
+console.log('asset-carried palette');
+{
+  // absent palette must stay absent, so every existing asset round-trips untouched
+  check('sample carries no palette field', parsed.meta.palette === null);
+  check('and none is emitted for it', !/\n {2}palette:/.test(out));
+
+  // a body with its own colours writes VoxelBody.palette as Unity serializes Color32[]
+  const m = defaultMeta();
+  m.palette = [
+    {r:232,g:201,b:58,a:255}, {r:245,g:146,b:11,a:255}, {r:0,g:255,b:0,a:255},
+    {r:70,g:201,b:60,a:255}, {r:58,g:123,b:240,a:255}, {r:154,g:154,b:154,a:255},
+  ];
+  const withPal = exportAsset({ N: 4, colours: new Uint8Array(64).fill(2),
+                                units: new Uint8Array(64), meta: m });
+  check('palette emitted in Unity Color32 form',
+    /\n {2}palette:\n {2}- \{r: 232, g: 201, b: 58, a: 255\}\n/.test(withPal),
+    (withPal.match(/palette:[\s\S]{0,60}/)||[''])[0]);
+  check('palette sits before size, like a Unity field order',
+    withPal.indexOf('  palette:') < withPal.indexOf('  size:'));
+
+  const back = parseAsset(withPal);
+  check('palette parses back with all six entries', back.meta.palette && back.meta.palette.length === 6);
+  check('the customised entry survives exactly',
+    JSON.stringify(back.meta.palette[2]) === JSON.stringify({r:0,g:255,b:0,a:255}),
+    JSON.stringify(back.meta.palette && back.meta.palette[2]));
+  check('asset with a palette round-trips byte-identically', exportAsset(back) === withPal);
+
+  // the voxel grid is STILL indices — a palette changes nothing about the bytes
+  const noPal = exportAsset({ N: 4, colours: new Uint8Array(64).fill(2),
+                              units: new Uint8Array(64), meta: defaultMeta() });
+  const gridOf = y => (y.match(/\n {2}colours: (\w+)/) || ['',''])[1];
+  check('voxel bytes are unchanged by the palette', gridOf(withPal) === gridOf(noPal));
+  check('and are still one byte per cell', gridOf(withPal).length === 64*2);
+}
+
 /* ---------- 3b-quinquies. the build grid resizes to any supported size ---------- */
 console.log('build grid size');
 {

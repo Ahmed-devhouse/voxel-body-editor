@@ -322,6 +322,92 @@ console.log('slice + model ops');
   sel.brush = 1; sel.sliceAxis = 'y'; sel.tool = 'paint';
 }
 
+/* ---------- 3b-quater. model rescale (resampling, not canvas resize) ---------- */
+console.log('model rescale');
+{
+  const st = await import(join(root, 'js/state.js'));
+  const { state, idx, EMPTY: E, rescaleModel, contentBounds } = st;
+  const build = (n, fn) => {
+    state.N = n;
+    state.colours = new Uint8Array(n*n*n).fill(E);
+    state.units = new Uint8Array(n*n*n);
+    for(let z=0;z<n;z++) for(let y=0;y<n;y++) for(let x=0;x<n;x++){
+      const v = fn(x,y,z);
+      if(v !== undefined) state.colours[idx(x,y,z)] = v;
+    }
+    st.clearHistory();
+  };
+  const count = () => state.colours.reduce((a,v) => a + (v!==E?1:0), 0);
+  const unitCount = () => state.units.reduce((a,v) => a + (v?1:0), 0);
+  const span = () => { const b = contentBounds(); return [b.x1-b.x0+1, b.y1-b.y0+1, b.z1-b.z0+1]; };
+
+  // ×2 on a floor-resting 2³ block: every voxel becomes a 2×2×2 block of the
+  // same colour, and the model stays on the floor
+  build(14, (x,y,z) => (x>=3&&x<5 && y<2 && z>=5&&z<7) ? 2 : undefined);
+  state.units[idx(3,0,5)] = 1;
+  let r = rescaleModel(2);
+  check('×2 doubles every span', !r.err && span().join('×') === '4×4×4', JSON.stringify(r));
+  check('×2 octuples the voxel count', count() === 64, String(count()));
+  check('×2 keeps the colour', state.colours.every(v => v === E || v === 2));
+  check('×2 keeps the model on the floor', contentBounds().y0 === 0);
+  check('×2 keeps ONE unit, not eight', unitCount() === 1, String(unitCount()));
+  check('×2 within the grid leaves N alone', state.N === 14 && !r.grew);
+
+  // undo restores the pre-rescale model
+  st.undo();
+  check('undo restores the small model', count() === 8 && span().join('×') === '2×2×2');
+
+  // ×1.5 on a solid 4³ block: nearest-neighbour leaves no holes
+  build(8, (x,y,z) => (x<4 && y<4 && z<4) ? 1 : undefined);
+  r = rescaleModel(1.5);
+  check('×1.5 rounds spans per axis', !r.err && span().join('×') === '6×6×6');
+  check('×1.5 of a solid block stays solid', count() === 216, String(count()));
+
+  // upscale auto-grows the grid when the bigger model no longer fits
+  build(14, (x,y,z) => (x<10 && y<10 && z<10) ? 3 : undefined);
+  r = rescaleModel(2);
+  check('upscale grows the grid to fit', !r.err && r.grew && state.N === 20, 'N=' + state.N);
+  check('grown-grid model is complete', count() === 8000, String(count()));
+
+  // past the MAX_N ceiling: refused, state untouched
+  build(14, (x,y,z) => (x<12 && y<12 && z<12) ? 3 : undefined);
+  r = rescaleModel(16);
+  check('over-ceiling rescale is refused', !!r.err);
+  check('refused rescale changes nothing', state.N === 14 && count() === 1728);
+
+  // ×0.5 majority vote: a block less than half solid vanishes, a full block
+  // survives with its commonest colour
+  build(6, (x,y,z) => {
+    if(z !== 0 || y > 1) return undefined;
+    if(x === 0 && y === 0) return 3;               // 1 of 4 cells → empty
+    if(x === 2 || x === 3) return (x === 3 && y === 1) ? 1 : 5; // 3× colour 5, 1× colour 1 → 5
+    return undefined;
+  });
+  r = rescaleModel(0.5);
+  check('under-half block merges to empty, full block survives', count() === 1, String(count()));
+  check('merged block takes the commonest colour', state.colours.find(v => v !== E) === 5);
+
+  // ×0.5 on a solid 4³ with two units in one block: units merge, never multiply
+  build(8, (x,y,z) => (x<4 && y<4 && z<4) ? 2 : undefined);
+  state.units[idx(0,0,0)] = 1; state.units[idx(1,0,0)] = 1;
+  r = rescaleModel(0.5);
+  check('×0.5 halves every span', !r.err && span().join('×') === '2×2×2');
+  check('×0.5 merges the block\'s units into one', unitCount() === 1, String(unitCount()));
+
+  // a lone thin rod is its own bounding box, so it survives a downscale
+  build(8, (x,y,z) => (x === 4 && y < 4 && z === 4) ? 4 : undefined);
+  r = rescaleModel(0.5);
+  check('a lone rod survives ×0.5', !r.err && count() === 2 && span().join('×') === '1×2×1');
+
+  // refusals
+  build(6, () => undefined);
+  check('empty model is refused', !!rescaleModel(2).err);
+  build(6, (x,y,z) => (x<4 && y<1 && z<1) ? 2 : undefined);
+  check('×1 is refused', !!rescaleModel(1).err);
+  check('a change that rounds away is refused', !!rescaleModel(1.05).err);
+  check('refusals leave the model alone', count() === 4);
+}
+
 /* ---------- 3a-bis. the palette travels with the asset ---------- */
 console.log('asset-carried palette');
 {

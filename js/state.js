@@ -227,6 +227,97 @@ export function resizeGrid(nn){
   return true;
 }
 
+/* ---------- model rescale ----------
+   Resamples the CONTENT, not the canvas. resizeGrid changes the grid around
+   untouched voxels; this rebuilds the model itself at a new voxel resolution:
+   scaling up ADDS voxels (×2 turns every voxel into a 2×2×2 block), scaling
+   down MERGES voxels (a block becomes one voxel by majority vote — at least
+   half of the merged cells must be solid, and the commonest colour wins).
+
+   Spans are rounded per axis, the grid auto-grows when the bigger model no
+   longer fits (never past MAX_N), and the model keeps its horizontal centre
+   and its floor level — the same anchoring the other grid ops use.
+
+   Units are gameplay-critical and countable, so they are never multiplied:
+   scaling up re-places each unit in the middle cell of the block its voxel
+   became; scaling down keeps the commonest unit of each merged block. */
+export function rescaleModel(factor){
+  if(!(factor > 0) || factor === 1) return { err: 'Pick a scale factor other than ×1' };
+  const b = contentBounds();
+  if(!b) return { err: 'The model is empty — nothing to rescale' };
+  const os = [b.x1-b.x0+1, b.y1-b.y0+1, b.z1-b.z0+1];
+  const ns = os.map(s => Math.max(1, Math.round(s*factor)));
+  if(ns[0]===os[0] && ns[1]===os[1] && ns[2]===os[2])
+    return { err: `×${factor} rounds to the same ${os.join('×')} voxels — no change` };
+  const maxSpan = Math.max(...ns);
+  if(maxSpan > MAX_N)
+    return { err: `×${factor} would need ${maxSpan} voxels on one side — the ceiling is ${MAX_N}` };
+
+  pushUndo();
+  const on = state.N, oc = state.colours, ou = state.units;
+  const nn = Math.max(on, maxSpan);           // grow the canvas if needed, never shrink it
+  const nc = new Uint8Array(nn*nn*nn).fill(EMPTY);
+  const nu = new Uint8Array(nn*nn*nn);
+
+  // where the rescaled box lands: keep the x/z centre and the bottom (y0)
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const nx0 = clamp(Math.round((b.x0 + b.x1 + 1 - ns[0]) / 2), 0, nn - ns[0]);
+  const ny0 = clamp(b.y0, 0, nn - ns[1]);
+  const nz0 = clamp(Math.round((b.z0 + b.z1 + 1 - ns[2]) / 2), 0, nn - ns[2]);
+  const src = (x,y,z) => oc[((b.x0+x)*on + (b.y0+y))*on + (b.z0+z)];
+  const dst = (x,y,z) => ((nx0+x)*nn + (ny0+y))*nn + (nz0+z);
+
+  if(factor > 1){
+    // upscale: nearest-neighbour per axis — exact block replication at integer
+    // factors. nearest(t) is monotone and onto, so every source voxel survives.
+    const nearest = (t, o, n) => Math.min(o-1, Math.floor((t + 0.5) * o / n));
+    for(let x=0;x<ns[0];x++) for(let y=0;y<ns[1];y++) for(let z=0;z<ns[2];z++)
+      nc[dst(x,y,z)] = src(nearest(x,os[0],ns[0]), nearest(y,os[1],ns[1]), nearest(z,os[2],ns[2]));
+    // one unit stays one unit: per axis, list the target cells each source cell
+    // becomes, and re-place the unit in the middle of its block
+    const targetsOf = (o, n) => {
+      const m = Array.from({length:o}, () => []);
+      for(let t=0;t<n;t++) m[nearest(t,o,n)].push(t);
+      return m;
+    };
+    const mx = targetsOf(os[0],ns[0]), my = targetsOf(os[1],ns[1]), mz = targetsOf(os[2],ns[2]);
+    const mid = a => a[a.length >> 1];
+    for(let x=0;x<os[0];x++) for(let y=0;y<os[1];y++) for(let z=0;z<os[2];z++){
+      const u = ou[((b.x0+x)*on + (b.y0+y))*on + (b.z0+z)];
+      if(u) nu[dst(mid(mx[x]), mid(my[y]), mid(mz[z]))] = u;
+    }
+  }else{
+    // downscale: each target cell owns a block of source cells (the rounded
+    // boundaries partition the box, so nothing is counted twice) and majority
+    // vote decides — solid when at least half the block is solid
+    const bounds = (o, n) => {
+      const a = new Array(n+1);
+      for(let t=0;t<=n;t++) a[t] = Math.round(t * o / n);
+      return a;
+    };
+    const bx = bounds(os[0],ns[0]), by = bounds(os[1],ns[1]), bz = bounds(os[2],ns[2]);
+    for(let x=0;x<ns[0];x++) for(let y=0;y<ns[1];y++) for(let z=0;z<ns[2];z++){
+      const cols = new Map(), units = new Map();
+      let total = 0, solid = 0;
+      for(let sx=bx[x];sx<bx[x+1];sx++) for(let sy=by[y];sy<by[y+1];sy++) for(let sz=bz[z];sz<bz[z+1];sz++){
+        total++;
+        const v = src(sx,sy,sz);
+        if(v === EMPTY) continue;
+        solid++;
+        cols.set(v, (cols.get(v)||0) + 1);
+        const u = ou[((b.x0+sx)*on + (b.y0+sy))*on + (b.z0+sz)];
+        if(u) units.set(u, (units.get(u)||0) + 1);
+      }
+      if(solid*2 < total) continue;
+      const mode = m => { let best=0, bv=0; for(const [k,c] of m) if(c>bv){ bv=c; best=k; } return best; };
+      nc[dst(x,y,z)] = mode(cols);
+      if(units.size) nu[dst(x,y,z)] = mode(units);
+    }
+  }
+  setGrid(nn, nc, nu);
+  return { from: os, to: ns, grid: nn, grew: nn !== on };
+}
+
 export function voxelCount(){
   let n=0;
   for(let i=0;i<state.colours.length;i++) if(state.colours[i]!==EMPTY) n++;

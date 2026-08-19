@@ -3,7 +3,7 @@
 import {
   state, sel, EMPTY, MIN_N, MAX_N, defaultMeta, resizeWouldClip,
   on, emit, pushUndo, undo, redo, setGrid, resizeGrid,
-  voxelCount, serialize, deserialize,
+  rescaleModel, contentBounds, voxelCount, serialize, deserialize,
 } from './state.js';
 import { parseAsset, exportAsset } from './asset.js';
 import {
@@ -274,6 +274,56 @@ function updateSizeNote(n){
   el.innerHTML = msg;
 }
 
+/* ---------- model rescale ---------- */
+function updateScaleNote(){
+  const el = $('scaleNote');
+  if(!el) return;
+  const b = contentBounds();
+  if(!b){ el.innerHTML = 'The model is empty — build something to rescale.'; return; }
+  const f = parseFloat($('fScale').value);
+  const os = [b.x1-b.x0+1, b.y1-b.y0+1, b.z1-b.z0+1];
+  let msg = `Rebuilds the model out of more or fewer voxels — the grid and voxel size stay put. `;
+  if(f > 0 && f !== 1){
+    const ns = os.map(s => Math.max(1, Math.round(s*f)));
+    const maxSpan = Math.max(...ns);
+    msg += `Now ${os.join('×')}, ×${f} makes it <b>${ns.join('×')}</b>`;
+    if(maxSpan > MAX_N) msg += ` — <span class="warnA">over the ${MAX_N}³ ceiling</span>`;
+    else if(maxSpan > state.N) msg += ` (grid grows to ${maxSpan}³ to fit)`;
+    msg += f < 1 ? '. Shrinking merges voxels, so fine detail is lost — undo brings it back.' : '.';
+  }
+  el.innerHTML = msg;
+}
+function wireRescale(){
+  const applyScale = f => {
+    const r = rescaleModel(f);
+    if(r.err) toast(r.err, true);
+    else toast(`Model rescaled ×${f}: ${r.from.join('×')} → ${r.to.join('×')} voxels` +
+               (r.grew ? ` — grid grown to ${r.grid}³ to fit` : ''));
+    updateScaleNote();
+  };
+  const fieldScale = () => applyScale(parseFloat($('fScale').value));
+  $('btnScaleModel').addEventListener('click', fieldScale);
+  $('fScale').addEventListener('keydown', e => { if(e.key === 'Enter') fieldScale(); });
+  $('fScale').addEventListener('input', updateScaleNote);
+  document.querySelectorAll('[data-scale]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      $('fScale').value = btn.dataset.scale;
+      applyScale(parseFloat(btn.dataset.scale));
+    }));
+  $('btnScaleFit').addEventListener('click', () => {
+    const b = contentBounds();
+    if(!b){ toast('The model is empty — nothing to rescale', true); return; }
+    const span = Math.max(b.x1-b.x0, b.y1-b.y0, b.z1-b.z0) + 1;
+    if(span === state.N){ toast('The model already fills the grid', true); return; }
+    $('fScale').value = Math.round(state.N/span*100)/100;
+    applyScale(state.N/span);
+  });
+  // the preview reads content bounds (a full-grid scan), so refresh it lazily
+  let noteTimer = 0;
+  on('grid', () => { clearTimeout(noteTimer); noteTimer = setTimeout(updateScaleNote, 150); });
+  updateScaleNote();
+}
+
 /* ---------- palette ---------- */
 function syncPaletteOwnership(){
   const own = $('palOwn');
@@ -496,6 +546,8 @@ function wireModelTab(){
   $('fSizeRange').addEventListener('change', e => applySize(parseInt(e.target.value)));
   document.querySelectorAll('[data-size]').forEach(b =>
     b.addEventListener('click', () => applySize(parseInt(b.dataset.size))));
+
+  wireRescale();
 
   renderPaletteEditor();
   renderColourSelects();

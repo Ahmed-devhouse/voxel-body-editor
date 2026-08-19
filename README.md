@@ -70,7 +70,7 @@ paid services: host it on GitHub Pages for free.
 | Tools | Build, paint, rectangle, **line**, erase, flood fill (slice area / 3D connected region), colour picker, unit placement; **brush sizes 1–4**; mirror-X / mirror-Z symmetry with live preview of every mirrored footprint |
 | Slice ops | Copy / paste a slice, duplicate it onto the neighbour and follow (hand extrusion), fill or empty a slice in one click |
 | Build grid | Any cube size (slider, number field or presets) — see below; the model keeps its place when you resize and nothing that fits is ever cut |
-| Model ops | Flip X/Y/Z, rotate 90°, shift on any axis, hollow (remove enclosed interior), **centre** on the floor, **trim** the grid down to the model, undo/redo (memory-bounded history) |
+| Model ops | Flip X/Y/Z, rotate 90°, shift on any axis, hollow (remove enclosed interior), **centre** on the floor, **trim** the grid down to the model, **rescale** the model itself — scaling up rebuilds it from more voxels, scaling down merges voxels by majority vote (see below) — undo/redo (memory-bounded history) |
 | Colours | The game's six (Y O R G B + X wildcard) with the real art hexes, each recolourable and relabellable; **ship your colours inside the asset** so the game renders exactly what you see (see below); add your own past those six; swap one colour for another or delete every voxel of a colour model-wide |
 | Import | Unity `.asset` (file or pasted YAML), MagicaVoxel `.vox` (colours mapped to the game palette, near-greys → X wildcard), PNG voxelizer approximating the Unity pipeline |
 | Export | Unity `.asset` byte-identical format, robust download fallbacks, copy-as-YAML, PNG screenshot |
@@ -84,6 +84,24 @@ The **Model** tab sets the grid: type a size, drag the slider, or take a preset
 when voxels genuinely have to be cut — anything that still fits is preserved, so
 a body resting on the floor survives being shrunk. `trim` resizes to fit the
 model exactly without losing anything.
+
+## Rescaling the model (resampling)
+
+Resizing the grid never changes the model — every body spans the same world
+size in play, so a bigger grid just means finer voxels. **Rescale model** (also
+on the Model tab) is the other operation: it resamples the *content*. Scale a
+small model ×2 and every voxel becomes a 2×2×2 block of the same colour — the
+model is genuinely rebuilt out of eight times as many voxels, not stretched.
+Scale ×½ and each 2×2×2 block merges into one voxel by majority vote: the cell
+stays solid when at least half the merged cells were solid, and the commonest
+colour wins. Non-integer factors (×1.5) work too; spans round per axis.
+
+The grid auto-grows when the scaled-up model no longer fits (never past
+`MAX_N`), the model keeps its horizontal centre and floor level, and units are
+never multiplied — a unit voxel scaled up stays one unit (re-placed in the
+middle of its block), and merged blocks keep their commonest unit. `fit grid`
+picks the factor that makes the longest side fill the current grid. Shrinking
+is lossy by nature; undo restores the original exactly.
 
 Sizes are **not** capped to `VoxelBody.size`'s `[Range(3, 24)]`. That attribute
 only limits the inspector slider, not what deserializes, and `VoxelCore` is

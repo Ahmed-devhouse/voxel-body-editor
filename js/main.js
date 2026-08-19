@@ -812,6 +812,27 @@ function wireKeyboard(){
     else if(k === 'u') setTool('unit');
     else if(k === '[') setSlice(sel.slice - 1);
     else if(k === ']') setSlice(sel.slice + 1);
+    else if(k === '{') setSlice(sel.slice - 5);
+    else if(k === '}') setSlice(sel.slice + 5);
+    // the layer slider's keys work from anywhere, so you can walk through the
+    // model while drawing without ever focusing the slider itself. A focused
+    // slider (grid size, tracing opacity, …) keeps its own arrow keys.
+    else if(['arrowup','arrowdown','arrowleft','arrowright','pageup','pagedown','home','end'].includes(k)){
+      if(e.target.matches('input[type=range]')) return;
+      e.preventDefault();
+      if(e.altKey && (k === 'arrowup' || k === 'arrowdown')){
+        // Alt+↑/↓ extrudes: duplicate the slice onto the neighbour and follow it
+        const up = k === 'arrowup';
+        const err = duplicateSlice(up ? 1 : -1);
+        toast(err || (up ? 'Duplicated upward' : 'Duplicated downward'), !!err);
+      }
+      else if(k === 'arrowup' || k === 'arrowright') setSlice(sel.slice + 1);
+      else if(k === 'arrowdown' || k === 'arrowleft') setSlice(sel.slice - 1);
+      else if(k === 'pageup') setSlice(sel.slice + 5);
+      else if(k === 'pagedown') setSlice(sel.slice - 5);
+      else if(k === 'home') setSlice(0);
+      else setSlice(state.N - 1);
+    }
     else if(k === 'x'){ sel.symX = !sel.symX; emit('sel'); }
     else if(k === 'z'){ sel.symZ = !sel.symZ; emit('sel'); }
     else if(k === 'h'){

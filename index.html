@@ -119,8 +119,8 @@
       <div id="sliceOps">
         <button class="minibtn" id="opCopy" title="Copy this slice (Ctrl/⌘+C)">copy</button>
         <button class="minibtn" id="opPaste" title="Paste onto this slice (Ctrl/⌘+V)">paste</button>
-        <button class="minibtn" id="opDupUp" title="Copy this slice onto the next one and follow it">dup ▲</button>
-        <button class="minibtn" id="opDupDown" title="Copy this slice onto the previous one and follow it">dup ▼</button>
+        <button class="minibtn" id="opDupUp" title="Copy this slice onto the next one and follow it (Alt+↑)">dup ▲</button>
+        <button class="minibtn" id="opDupDown" title="Copy this slice onto the previous one and follow it (Alt+↓)">dup ▼</button>
         <button class="minibtn" id="opFill" title="Fill the whole slice with the active colour">fill</button>
         <button class="minibtn danger" id="opClear" title="Empty this slice">clear</button>
         <span class="spacer"></span>
@@ -129,7 +129,8 @@
       </div>
       <div id="sliceFoot">
         <span id="sliceLbl">y 00/13</span>
-        <input type="range" id="sliceRange" min="0" max="13" value="7" aria-label="Slice index">
+        <input type="range" id="sliceRange" min="0" max="13" value="7" aria-label="Slice index"
+               title="Layer — ↑↓ or [ ] step, PgUp/PgDn or { } jump 5, Home/End first/last, Alt+↑↓ duplicate &amp; follow">
         <div id="occ" title="Voxels per slice — click to jump"></div>
       </div>
     </section>
@@ -304,7 +305,9 @@
       <tr><td><kbd>E</kbd></td><td>Erase</td><td><kbd>G</kbd></td><td>Fill</td></tr>
       <tr><td><kbd>I</kbd></td><td>Pick colour</td><td><kbd>U</kbd></td><td>Unit</td></tr>
       <tr><td><kbd>1</kbd>–<kbd>6</kbd></td><td>Colour Y O R G B X</td><td><kbd>−</kbd> <kbd>+</kbd></td><td>Brush size</td></tr>
-      <tr><td><kbd>7</kbd> <kbd>8</kbd> <kbd>9</kbd></td><td>Top / front / side view</td><td><kbd>[</kbd> <kbd>]</kbd></td><td>Slice down / up</td></tr>
+      <tr><td><kbd>7</kbd> <kbd>8</kbd> <kbd>9</kbd></td><td>Top / front / side view</td><td><kbd>[</kbd> <kbd>]</kbd> or <kbd>↓</kbd> <kbd>↑</kbd></td><td>Slice down / up</td></tr>
+      <tr><td><kbd>PgDn</kbd> <kbd>PgUp</kbd> or <kbd>{</kbd> <kbd>}</kbd></td><td>Slice ±5</td><td><kbd>Home</kbd> <kbd>End</kbd></td><td>First / last slice</td></tr>
+      <tr><td><kbd>Alt ↑</kbd> <kbd>Alt ↓</kbd></td><td>Duplicate slice &amp; follow (extrude)</td><td></td><td></td></tr>
       <tr><td><kbd>X</kbd> <kbd>Z</kbd></td><td>Toggle mirror X / Z</td><td><kbd>H</kbd></td><td>Isolate (see inside)</td></tr>
       <tr><td><kbd>Ctrl/⌘ C</kbd></td><td>Copy slice</td><td><kbd>Ctrl/⌘ V</kbd></td><td>Paste slice</td></tr>
       <tr><td><kbd>Ctrl/⌘ Z</kbd></td><td>Undo</td><td><kbd>Ctrl/⌘ Y</kbd></td><td>Redo</td></tr>
